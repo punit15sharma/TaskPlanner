@@ -120,12 +120,7 @@
                                     {task.deadline && <span>Deadline: {new Date(task.deadline).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
                                 </div>
                                 <div className="tcard-detail-notes" onClick={e => e.stopPropagation()}>
-                                    <div className="tcard-detail-notes-header">
-                                        <span className="tcard-detail-notes-label">Notes</span>
-                                        {!editingNotes && (
-                                            <button className="tcard-notes-edit-btn" onClick={startNotesEdit} title="Edit notes">&#9998;</button>
-                                        )}
-                                    </div>
+                                    <div className="tcard-detail-notes-label">Notes</div>
                                     {editingNotes ? (
                                         <textarea
                                             ref={notesRef}
