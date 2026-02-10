@@ -1,10 +1,33 @@
-const PROJECTS = {
+// Default projects - users can add more
+const DEFAULT_PROJECTS = {
    'HH bbyy': { name: 'HH bbyy', color: '#3b82f6' },
    'EF Tracking': { name: 'EF Tracking', color: '#ef4444' },
    'FCC 6Jets': { name: 'FCC 6Jets', color: '#8b5cf6' },
    'misc-atlas': { name: 'Misc. ATLAS', color: '#f59e0b' },
    'other': { name: 'Other', color: '#6b7280' }
 };
+
+// Load projects from localStorage or use defaults
+const loadProjects = () => {
+   const saved = localStorage.getItem('projects');
+   if (saved) {
+       const parsed = JSON.parse(saved);
+       // Ensure 'other' always exists
+       if (!parsed['other']) {
+           parsed['other'] = { name: 'Other', color: '#6b7280' };
+       }
+       return parsed;
+   }
+   return { ...DEFAULT_PROJECTS };
+};
+
+// Save projects to localStorage
+const saveProjects = (projects) => {
+   localStorage.setItem('projects', JSON.stringify(projects));
+};
+
+// Initialize PROJECTS as mutable
+let PROJECTS = loadProjects();
 
 const calculatePriority = (task) => {
    const daysSinceCreation = (new Date() - new Date(task.createdAt)) / (1000 * 60 * 60 * 24);
@@ -94,3 +117,105 @@ const analyzeWorkload = (tasks) => {
    let workload = "Your workload score is " + Math.round(totalWorkload) + " It's okay to take breaks";
    return { message, advice, workload };
 };
+
+// ─── Calendar Helpers ───────────────────────────────────────────────
+const getCalendarDays = (year, month) => {
+   const firstDay = new Date(year, month, 1);
+   const lastDay = new Date(year, month + 1, 0);
+   const startPad = firstDay.getDay(); // 0=Sun
+   const totalDays = lastDay.getDate();
+   
+   const days = [];
+   // Previous month padding
+   const prevLastDay = new Date(year, month, 0).getDate();
+   for (let i = startPad - 1; i >= 0; i--) {
+       days.push({ day: prevLastDay - i, currentMonth: false });
+   }
+   // Current month days
+   for (let i = 1; i <= totalDays; i++) {
+       days.push({ day: i, currentMonth: true });
+   }
+   // Next month padding
+   const remaining = 42 - days.length; // 6 rows * 7 cols
+   for (let i = 1; i <= remaining; i++) {
+       days.push({ day: i, currentMonth: false });
+   }
+   return days;
+};
+
+const getTasksForDate = (tasks, year, month, day) => {
+   const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+   return tasks.filter(task => {
+       if (!task.deadline) return false;
+       return task.deadline === dateStr;
+   });
+};
+
+const MONTH_NAMES = [
+   'January', 'February', 'March', 'April', 'May', 'June',
+   'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// ─── ICS Export ─────────────────────────────────────────────────────
+const formatICSDate = (dateStr) => {
+   // Convert "YYYY-MM-DD" to "YYYYMMDD"
+   return dateStr.replace(/-/g, '');
+};
+
+const generateICS = (tasks) => {
+   const tasksWithDeadlines = tasks.filter(t => t.deadline);
+   if (tasksWithDeadlines.length === 0) {
+       alert('No tasks with deadlines to export to calendar.');
+       return;
+   }
+
+   let ics = [
+       'BEGIN:VCALENDAR',
+       'VERSION:2.0',
+       'PRODID:-//TaskManager//EN',
+       'CALSCALE:GREGORIAN',
+       'METHOD:PUBLISH',
+       'X-WR-CALNAME:Task Manager'
+   ];
+
+   tasksWithDeadlines.forEach(task => {
+       const projectName = (PROJECTS[task.project] && PROJECTS[task.project].name) || 'Other';
+       const uid = `task-${task.id}@taskmanager`;
+       const dtstart = formatICSDate(task.deadline);
+       // All-day event: DTEND is the next day
+       const endDate = new Date(task.deadline);
+       endDate.setDate(endDate.getDate() + 1);
+       const dtend = endDate.toISOString().split('T')[0].replace(/-/g, '');
+       const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+       ics.push('BEGIN:VEVENT');
+       ics.push(`UID:${uid}`);
+       ics.push(`DTSTAMP:${now}`);
+       ics.push(`DTSTART;VALUE=DATE:${dtstart}`);
+       ics.push(`DTEND;VALUE=DATE:${dtend}`);
+       ics.push(`SUMMARY:[${projectName}] ${task.name}`);
+       ics.push(`DESCRIPTION:Importance: ${task.importance}/5\\nLength: ${task.length}/5\\nDifficulty: ${task.difficulty}/5\\nPriority Score: ${calculatePriority(task)}`);
+       ics.push(`CATEGORIES:${projectName}`);
+       ics.push('STATUS:NEEDS-ACTION');
+       ics.push('END:VEVENT');
+   });
+
+   ics.push('END:VCALENDAR');
+
+   const blob = new Blob([ics.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+   const url = URL.createObjectURL(blob);
+   const a = document.createElement('a');
+   a.href = url;
+   a.download = `tasks-${new Date().toISOString().split('T')[0]}.ics`;
+   a.click();
+   URL.revokeObjectURL(url);
+};
+
+// Preset colors for new projects
+const PROJECT_COLORS = [
+   '#3b82f6', '#ef4444', '#8b5cf6', '#f59e0b', '#10b981',
+   '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1',
+   '#84cc16', '#e11d48', '#0ea5e9', '#a855f7', '#22c55e'
+];

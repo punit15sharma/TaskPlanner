@@ -733,3 +733,406 @@ select.input:focus {
 .importance-3 { background: rgba(220, 38, 38, 0.4); }
 .importance-4 { background: rgba(220, 38, 38, 0.6); }
 .importance-5 { background: rgba(220, 38, 38, 0.8); }
+
+/* ─── View Toggle (Tasks / Calendar) ──────────────── */
+.view-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin: 0.75rem auto 0;
+    background: var(--color-gray-100);
+    border-radius: var(--radius);
+    padding: 3px;
+    width: fit-content;
+}
+
+.view-toggle-btn {
+    padding: 0.45rem 1.5rem;
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    background: transparent;
+    color: var(--color-gray-500);
+    transition: all 0.2s ease;
+}
+
+.view-toggle-btn.active {
+    background: white;
+    color: var(--color-primary);
+    box-shadow: var(--shadow-sm);
+    font-weight: 600;
+}
+
+.view-toggle-btn:hover:not(.active) {
+    color: var(--color-gray-700);
+}
+
+/* ─── Add Project Tab ─────────────────────────────── */
+.add-project-tab {
+    border: 1px dashed var(--color-gray-300) !important;
+    color: var(--color-gray-400) !important;
+    font-weight: 500;
+}
+
+.add-project-tab:hover {
+    border-color: var(--color-primary) !important;
+    color: var(--color-primary) !important;
+    background: rgba(37, 99, 235, 0.05) !important;
+}
+
+.project-delete-x {
+    display: inline-block;
+    margin-left: 0.4rem;
+    font-size: 1rem;
+    line-height: 1;
+    color: var(--color-gray-400);
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.project-delete-x:hover {
+    color: var(--color-danger);
+}
+
+/* ─── Add Project Modal ───────────────────────────── */
+.add-project-modal {
+    max-width: 480px;
+}
+
+.color-picker-section {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--color-gray-50);
+    border-radius: var(--radius);
+}
+
+.color-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.color-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.color-swatch:hover {
+    transform: scale(1.15);
+}
+
+.color-swatch.selected {
+    border-color: #1a1a1a;
+    box-shadow: 0 0 0 2px white, 0 0 0 4px currentColor;
+    transform: scale(1.1);
+}
+
+.color-input-native {
+    width: 36px;
+    height: 30px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.project-preview {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+}
+
+/* ─── Dark Mode additions ─────────────────────────── */
+@media (prefers-color-scheme: dark) {
+    .view-toggle {
+        background: #333;
+    }
+    .view-toggle-btn.active {
+        background: #444;
+        color: #68a697;
+    }
+    .add-project-modal,
+    .color-picker-section {
+        background: #333;
+    }
+    .color-swatch.selected {
+        border-color: #fff;
+    }
+    .project-delete-x {
+        color: #888;
+    }
+    .project-delete-x:hover {
+        color: #dc2626;
+    }
+    /* Google Calendar dark mode */
+    .gcal-control-bar {
+        background: #333;
+        border-color: #404040;
+    }
+    .gcal-bar-label {
+        color: #ccc;
+    }
+    .gcal-bar-status {
+        color: #aaa;
+    }
+    .gcal-bar-count {
+        color: #888;
+    }
+    .gcal-settings-btn {
+        background: #444;
+        color: #ccc;
+        border-color: #555;
+    }
+    .gcal-settings-btn:hover {
+        background: #555;
+    }
+    .gcal-empty-state {
+        background: #333;
+        border-color: #404040;
+        color: #aaa;
+    }
+    .gcal-empty-state h3 {
+        color: #ddd;
+    }
+    .gcal-hint {
+        background: #333;
+        border-color: #404040;
+        color: #aaa;
+    }
+    .gcal-embed-wrapper {
+        border-color: #404040;
+    }
+    .gcal-setup-modal {
+        background: #2d2d2d;
+    }
+    .gcal-setup-section {
+        border-color: #404040;
+    }
+    .gcal-setup-heading {
+        color: #eee;
+    }
+    .gcal-optional {
+        color: #888;
+    }
+    .gcal-instructions {
+        background: #333;
+        border-color: #404040;
+        color: #ccc;
+    }
+    .gcal-instructions a {
+        color: #68a697;
+    }
+    .gcal-synced-badge {
+        background: rgba(104, 166, 151, 0.2);
+        color: #68a697;
+    }
+}
+
+/* ─── Google Calendar View ────────────────────────── */
+.gcal-view {
+    padding: 1.5rem;
+}
+
+.gcal-control-bar {
+    display: flex;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: var(--color-gray-50);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+}
+
+.gcal-bar-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.gcal-bar-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.gcal-connected-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.gcal-bar-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--color-gray-700);
+}
+
+.gcal-bar-status {
+    font-size: 0.8rem;
+    color: var(--color-gray-500);
+    padding: 0.15rem 0.6rem;
+    background: rgba(0,0,0,0.04);
+    border-radius: 9999px;
+}
+
+.gcal-bar-count {
+    font-size: 0.8rem;
+    color: var(--color-gray-400);
+}
+
+.gcal-bar-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.gcal-settings-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius);
+    background: white;
+    cursor: pointer;
+    font-size: 1.15rem;
+    transition: all 0.15s;
+    color: var(--color-gray-500);
+}
+
+.gcal-settings-btn:hover {
+    background: var(--color-gray-50);
+    color: var(--color-gray-700);
+}
+
+.gcal-embed-wrapper {
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--color-gray-200);
+}
+
+.gcal-iframe {
+    width: 100%;
+    height: 600px;
+    border: none;
+}
+
+.gcal-empty-state {
+    text-align: center;
+    padding: 3rem 2rem;
+    background: var(--color-gray-50);
+    border-radius: var(--radius);
+    border: 1px dashed var(--color-gray-300);
+    color: var(--color-gray-500);
+}
+
+.gcal-empty-state h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--color-gray-700);
+    margin: 0.5rem 0;
+}
+
+.gcal-empty-icon {
+    font-size: 3rem;
+    margin-bottom: 0.25rem;
+}
+
+.gcal-hint {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-gray-50);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    color: var(--color-gray-500);
+    line-height: 1.5;
+}
+
+/* ─── Google Calendar Setup Modal ─────────────────── */
+.gcal-setup-modal {
+    max-width: 600px;
+}
+
+.gcal-setup-section {
+    margin: 1.25rem 0;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-gray-200);
+}
+
+.gcal-setup-section:last-of-type {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.gcal-setup-heading {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-gray-700);
+    margin-bottom: 0.5rem;
+}
+
+.gcal-optional {
+    font-weight: 400;
+    font-size: 0.8rem;
+    color: var(--color-gray-400);
+}
+
+.gcal-instructions {
+    background: var(--color-gray-50);
+    padding: 0.85rem 1.1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--color-gray-200);
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.gcal-instructions ol {
+    padding-left: 1.25rem;
+    margin: 0;
+}
+
+.gcal-instructions li {
+    margin-bottom: 0.2rem;
+}
+
+.gcal-instructions a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.gcal-instructions a:hover {
+    text-decoration: underline;
+}
+
+/* ─── Synced Badge on Tasks ───────────────────────── */
+.gcal-synced-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.45rem;
+    border-radius: 9999px;
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}

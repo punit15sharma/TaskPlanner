@@ -8,18 +8,47 @@
     <script src="imports/react-dom.js"></script>
     <script src="imports/babel.js"></script>
     <link rel="stylesheet" href="styles.css">
+    <!-- Google Calendar API -->
+    <script async defer src="https://apis.google.com/js/api.js" onload="onGapiLoad()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="onGisLoad()"></script>
 </head>
 <body>
     <div id="root"></div>
     <script src="utils.js"></script>
+
+    <!-- Google API bootstrap (runs before React) -->
+    <script>
+        var __gapiReady = false, __gisReady = false;
+        var __gapiCbs = [], __gisCbs = [];
+
+        function onGapiLoad() {
+            gapi.load('client', function() {
+                gapi.client.init({}).then(function() {
+                    return gapi.client.load('https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest');
+                }).then(function() {
+                    __gapiReady = true;
+                    __gapiCbs.forEach(function(cb) { cb(); });
+                    __gapiCbs = [];
+                });
+            });
+        }
+
+        function onGisLoad() {
+            __gisReady = true;
+            __gisCbs.forEach(function(cb) { cb(); });
+            __gisCbs = [];
+        }
+    </script>
+
     <script type="text/babel">
         function TaskMatrix() {
 
+            // ─── Core State ─────────────────────────────────────
             const [tasks, setTasks] = React.useState(() => {
                 const savedTasks = localStorage.getItem('tasks');
                 return savedTasks ? JSON.parse(savedTasks) : [];
             });
-            
+
             const [completedTasks, setCompletedTasks] = React.useState(() => {
                 const saved = localStorage.getItem('completedTasks');
                 return saved ? JSON.parse(saved) : [];
@@ -27,22 +56,81 @@
 
             const [showCompleted, setShowCompleted] = React.useState(false);
 
-            const [newTask, setNewTask] = React.useState({ 
-                name: '', 
-                importance: 3, 
-                length: 3, 
-                difficulty: 3,
-                project: 'other'  // Default project
+            const [newTask, setNewTask] = React.useState({
+                name: '', importance: 3, length: 3, difficulty: 3, project: 'other'
             });
 
-            const [currentFilter, setCurrentFilter] = React.useState('all'); // Default to showing all tasks
-
-            const [activeTab, setActiveTab] = React.useState('tasks'); // 'tasks' or 'notes'
+            const [currentFilter, setCurrentFilter] = React.useState('all');
+            const [activeTab, setActiveTab] = React.useState('tasks');
 
             const [projectNotes, setProjectNotes] = React.useState(() => {
                 const savedNotes = localStorage.getItem('projectNotes');
                 return savedNotes ? JSON.parse(savedNotes) : { 'general': '' };
             });
+
+            // ─── Dynamic Projects ───────────────────────────────
+            const [projects, setProjects] = React.useState(() => loadProjects());
+            const [showAddProject, setShowAddProject] = React.useState(false);
+            const [newProjectName, setNewProjectName] = React.useState('');
+            const [newProjectColor, setNewProjectColor] = React.useState(PROJECT_COLORS[0]);
+
+            // ─── Google Calendar State ──────────────────────────
+            const [gcalClientId, setGcalClientId] = React.useState(() =>
+                localStorage.getItem('gcalClientId') || ''
+            );
+            const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() =>
+                localStorage.getItem('gcalEmbedUrl') || ''
+            );
+            const [gcalSignedIn, setGcalSignedIn] = React.useState(false);
+            const [gcalEventMap, setGcalEventMap] = React.useState(() =>
+                JSON.parse(localStorage.getItem('gcalEventMap') || '{}')
+            );
+            const [gcalSyncing, setGcalSyncing] = React.useState(false);
+            const [gcalStatus, setGcalStatus] = React.useState('');
+            const [apisLoaded, setApisLoaded] = React.useState(false);
+            const [showGcalSetup, setShowGcalSetup] = React.useState(false);
+            const [gcalRefreshKey, setGcalRefreshKey] = React.useState(0);
+
+            const tokenClientRef = React.useRef(null);
+
+            // ─── Edit State ─────────────────────────────────────
+            const [editingTask, setEditingTask] = React.useState(null);
+
+            // ─── Google API Initialization ──────────────────────
+            React.useEffect(() => {
+                const check = () => {
+                    if (__gapiReady && __gisReady) setApisLoaded(true);
+                };
+                if (__gapiReady && __gisReady) {
+                    setApisLoaded(true);
+                } else {
+                    if (!__gapiReady) __gapiCbs.push(check);
+                    if (!__gisReady) __gisCbs.push(check);
+                }
+            }, []);
+
+            React.useEffect(() => {
+                if (apisLoaded && gcalClientId) {
+                    tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+                        client_id: gcalClientId,
+                        scope: 'https://www.googleapis.com/auth/calendar.events',
+                        callback: (resp) => {
+                            if (resp.error) {
+                                setGcalStatus('Auth failed: ' + resp.error);
+                                return;
+                            }
+                            setGcalSignedIn(true);
+                            setGcalStatus('Signed in');
+                        },
+                    });
+                }
+            }, [apisLoaded, gcalClientId]);
+
+            // ─── Persistence ────────────────────────────────────
+            React.useEffect(() => {
+                PROJECTS = projects;
+                saveProjects(projects);
+            }, [projects]);
 
             React.useEffect(() => {
                 localStorage.setItem('tasks', JSON.stringify(tasks));
@@ -50,74 +138,220 @@
                 localStorage.setItem('projectNotes', JSON.stringify(projectNotes));
             }, [tasks, completedTasks, projectNotes]);
 
-            const addTask = () => {
-                if (newTask.name.trim()) {
-                    setTasks(prev => [...prev, { 
-                        ...newTask, 
-                        id: Date.now(),
-                        project: newTask.project || 'other',
-                        createdAt: new Date().toISOString()
-                    }]);
-                    setNewTask({ name: '', importance: 3, length: 3, difficulty: 3, project: 'other' });
+            React.useEffect(() => {
+                localStorage.setItem('gcalEventMap', JSON.stringify(gcalEventMap));
+            }, [gcalEventMap]);
+
+            // ─── Google Calendar Helpers ────────────────────────
+            const isGcalReady = () => gcalSignedIn && gapi && gapi.client && gapi.client.getToken();
+
+            const refreshEmbed = () => setGcalRefreshKey(k => k + 1);
+
+            const syncOneTask = async (task) => {
+                if (!isGcalReady() || !task.deadline) return null;
+
+                const projName = (projects[task.project] || projects.other).name;
+                const event = {
+                    summary: '[' + projName + '] ' + task.name,
+                    description: 'Importance: ' + task.importance + '/5\nLength: ' + task.length + '/5\nDifficulty: ' + task.difficulty + '/5\nPriority: ' + calculatePriority(task),
+                    start: { date: task.deadline },
+                    end: { date: task.deadline },
+                };
+
+                try {
+                    let resp;
+                    const existingId = gcalEventMap[task.id];
+                    if (existingId) {
+                        try {
+                            resp = await gapi.client.calendar.events.update({
+                                calendarId: 'primary', eventId: existingId, resource: event
+                            });
+                        } catch (_) {
+                            resp = await gapi.client.calendar.events.insert({
+                                calendarId: 'primary', resource: event
+                            });
+                        }
+                    } else {
+                        resp = await gapi.client.calendar.events.insert({
+                            calendarId: 'primary', resource: event
+                        });
+                    }
+                    setGcalEventMap(prev => ({ ...prev, [task.id]: resp.result.id }));
+                    return resp.result.id;
+                } catch (err) {
+                    console.error('Sync error:', task.name, err);
+                    return null;
                 }
             };
 
+            const removeOneFromGcal = async (taskId) => {
+                if (!isGcalReady()) return;
+                const evId = gcalEventMap[taskId];
+                if (!evId) return;
+                try {
+                    await gapi.client.calendar.events.delete({ calendarId: 'primary', eventId: evId });
+                } catch (_) { /* may already be gone */ }
+                setGcalEventMap(prev => { const u = { ...prev }; delete u[taskId]; return u; });
+            };
+
+            const syncAllTasks = async () => {
+                if (!isGcalReady()) return;
+                setGcalSyncing(true);
+                setGcalStatus('Syncing...');
+                const withDeadlines = tasks.filter(t => t.deadline);
+                let ok = 0;
+                for (const t of withDeadlines) {
+                    if (await syncOneTask(t)) ok++;
+                }
+                setGcalSyncing(false);
+                setGcalStatus('Synced ' + ok + ' of ' + withDeadlines.length + ' tasks');
+                refreshEmbed();
+            };
+
+            const signIn = () => {
+                if (tokenClientRef.current) {
+                    tokenClientRef.current.requestAccessToken({ prompt: 'consent' });
+                }
+            };
+
+            const signOut = () => {
+                const tok = gapi.client.getToken();
+                if (tok) {
+                    google.accounts.oauth2.revoke(tok.access_token);
+                    gapi.client.setToken(null);
+                }
+                setGcalSignedIn(false);
+                setGcalStatus('Signed out');
+            };
+
+            // ─── Google Calendar Setup ──────────────────────────
+            const [setupClientId, setSetupClientId] = React.useState('');
+            const [setupEmbedUrl, setSetupEmbedUrl] = React.useState('');
+
+            const openSetup = () => {
+                setSetupClientId(gcalClientId);
+                setSetupEmbedUrl(gcalEmbedUrl);
+                setShowGcalSetup(true);
+            };
+
+            const saveSetup = () => {
+                const cid = setupClientId.trim();
+                const embed = setupEmbedUrl.trim();
+
+                if (cid) {
+                    setGcalClientId(cid);
+                    localStorage.setItem('gcalClientId', cid);
+                }
+
+                if (embed) {
+                    // Extract src if they paste full iframe tag
+                    const m = embed.match(/src="([^"]+)"/);
+                    const url = m ? m[1] : embed;
+                    setGcalEmbedUrl(url);
+                    localStorage.setItem('gcalEmbedUrl', url);
+                } else {
+                    setGcalEmbedUrl('');
+                    localStorage.removeItem('gcalEmbedUrl');
+                }
+
+                setShowGcalSetup(false);
+            };
+
+            // ─── Project Management ─────────────────────────────
+            const addProject = () => {
+                const trimmed = newProjectName.trim();
+                if (!trimmed) return;
+                const id = trimmed.toLowerCase().replace(/\s+/g, '-');
+                if (projects[id]) { alert('A project with this name already exists.'); return; }
+                setProjects(prev => ({ ...prev, [id]: { name: trimmed, color: newProjectColor } }));
+                setNewProjectName('');
+                setNewProjectColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]);
+                setShowAddProject(false);
+            };
+
+            const deleteProject = (pid) => {
+                if (pid === 'other') return;
+                if (!confirm('Delete project "' + projects[pid].name + '"? Tasks move to "Other".')) return;
+                setTasks(prev => prev.map(t => t.project === pid ? { ...t, project: 'other' } : t));
+                setCompletedTasks(prev => prev.map(t => t.project === pid ? { ...t, project: 'other' } : t));
+                setProjects(prev => { const u = { ...prev }; delete u[pid]; return u; });
+                if (currentFilter === pid) setCurrentFilter('all');
+            };
+
+            // ─── Task Operations (with Google Calendar sync) ────
             const completeTask = (task) => {
-                const taskElement = document.getElementById(`task-${task.id}`);
-                taskElement.classList.add('celebrate');
-                
+                const el = document.getElementById('task-' + task.id);
+                el.classList.add('celebrate');
                 setTimeout(() => {
                     setTasks(prev => prev.filter(t => t.id !== task.id));
                     setCompletedTasks(prev => [{
-                        ...task,
-                        completedAt: new Date().toISOString()
+                        ...task, completedAt: new Date().toISOString()
                     }, ...prev.slice(0, 49)]);
+                    // Remove from Google Calendar when completed
+                    removeOneFromGcal(task.id).then(refreshEmbed);
                 }, 500);
             };
 
             const revertTask = (task) => {
                 setCompletedTasks(prev => prev.filter(t => t.id !== task.id));
-                setTasks(prev => [...prev, {
-                    ...task,
-                    createdAt: new Date().toISOString() // Reset creation date to now
-                }]);
+                const reverted = { ...task, createdAt: new Date().toISOString() };
+                setTasks(prev => [...prev, reverted]);
+                // Re-sync to Google Calendar
+                if (reverted.deadline) syncOneTask(reverted).then(refreshEmbed);
             };
 
             const removeTask = (id) => {
-                setTasks(prev => prev.filter(task => task.id !== id));
+                setTasks(prev => prev.filter(t => t.id !== id));
+                removeOneFromGcal(id).then(refreshEmbed);
             };
 
             const removeCompletedTask = (id) => {
-                setCompletedTasks(prev => prev.filter(task => task.id !== id));
+                setCompletedTasks(prev => prev.filter(t => t.id !== id));
             };
 
+            const startEditing = (task) => setEditingTask(task);
+
+            const saveEdit = () => {
+                let savedTask;
+                if (editingTask.id === 'new') {
+                    savedTask = { ...editingTask, id: Date.now(), createdAt: new Date().toISOString() };
+                    setTasks(prev => [...prev, savedTask]);
+                } else {
+                    savedTask = editingTask;
+                    setTasks(prev => prev.map(t => t.id === editingTask.id ? editingTask : t));
+                }
+                setEditingTask(null);
+                // Sync to Google Calendar
+                if (savedTask.deadline) {
+                    syncOneTask(savedTask).then(refreshEmbed);
+                } else {
+                    // If deadline removed, delete from calendar
+                    removeOneFromGcal(savedTask.id).then(refreshEmbed);
+                }
+            };
+
+            // ─── Filtering & Sorting ────────────────────────────
             const sortedTasks = [...tasks].sort((a, b) => calculatePriority(b) - calculatePriority(a));
-            const filteredTasks = currentFilter === 'all' 
-                ? sortedTasks 
+            const filteredTasks = currentFilter === 'all'
+                ? sortedTasks
                 : sortedTasks.filter(task => {
-                    // If filtering by 'other', include tasks that have no project or project is 'other'
-                    if (currentFilter === 'other') {
-                        return !task.project || task.project === 'other';
-                    }
-                    // Otherwise, match the specific project
+                    if (currentFilter === 'other') return !task.project || task.project === 'other';
                     return task.project === currentFilter;
-            });
+                });
 
-            const filteredCompletedTasks = currentFilter === 'all' 
-                ? completedTasks 
-                : completedTasks.filter(task => task.project === currentFilter || 
-                    (!task.project && currentFilter === 'other')); // Include tasks with no project in "other"
+            const filteredCompletedTasks = currentFilter === 'all'
+                ? completedTasks
+                : completedTasks.filter(task => task.project === currentFilter ||
+                    (!task.project && currentFilter === 'other'));
 
+            // ─── JSON Import / Export ───────────────────────────
             const exportToJson = () => {
-                const data = {
-                    tasks: tasks,
-                    completedTasks: completedTasks
-                };
+                const data = { tasks, completedTasks, projects };
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `tasks-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.download = 'tasks-backup-' + new Date().toISOString().split('T')[0] + '.json';
                 a.click();
                 URL.revokeObjectURL(url);
             };
@@ -131,356 +365,450 @@
                             const data = JSON.parse(e.target.result);
                             setTasks(data.tasks || []);
                             setCompletedTasks(data.completedTasks || []);
-                        } catch (error) {
-                            alert('Invalid JSON file');
-                        }
+                            if (data.projects) {
+                                setProjects(prev => ({
+                                    ...prev, ...data.projects,
+                                    other: prev.other || { name: 'Other', color: '#6b7280' }
+                                }));
+                            }
+                        } catch (_) { alert('Invalid JSON file'); }
                     };
                     reader.readAsText(file);
                 }
-                event.target.value = ''; // Reset input
+                event.target.value = '';
             };
 
-            const [editingTask, setEditingTask] = React.useState(null);
+            // ─── Count synced tasks ─────────────────────────────
+            const tasksWithDeadlines = tasks.filter(t => t.deadline).length;
+            const syncedCount = Object.keys(gcalEventMap).filter(id =>
+                tasks.some(t => String(t.id) === id && t.deadline)
+            ).length;
 
-            const startEditing = (task) => {
-                setEditingTask(task);
-            };
-
-            const saveEdit = () => {
-                if (editingTask.id === 'new') {
-                    // Adding a new task
-                    const newTaskObj = {
-                    ...editingTask,
-                    id: Date.now(),
-                    createdAt: new Date().toISOString()
-                    };
-                    setTasks(prev => [...prev, newTaskObj]);
-                } else {
-                    // Editing existing task
-                    setTasks(prev => prev.map(task => 
-                    task.id === editingTask.id ? editingTask : task
-                    ));
-                }
-                setEditingTask(null);
-            };
-
+            // ═════════════════════════════════════════════════════
+            //                     RENDER
+            // ═════════════════════════════════════════════════════
             return (
-                <div>  {/* New wrapper */}
-
+                <div>
                     <div className="card">
+                        {/* ── HEADER ────────────────────────────── */}
                         <div className="header-container">
                             <div className="header-left">
                                 <h1 className="text-xl font-bold">Task Manager</h1>
                             </div>
-                            
                             <div className="header-center workload-message">
                                 <div className="message-main">{analyzeWorkload(tasks).message}</div>
                                 <div className="message-advice">{analyzeWorkload(tasks).advice}</div>
                                 <div className="message-workload">{analyzeWorkload(tasks).workload}</div>
                             </div>
-                            
                             <div className="header-right">
-                                <button onClick={exportToJson} className="btn-secondary">
-                                Export to JSON
+                                <button onClick={() => generateICS(tasks)} className="btn-secondary" title="Download .ics file (works without Google sign-in)">
+                                    Export .ics
                                 </button>
+                                <button onClick={exportToJson} className="btn-secondary">Export JSON</button>
                                 <label className="btn-secondary">
-                                Import from JSON
-                                <input
-                                    type="file"
-                                    accept=".json"
-                                    onChange={importFromJson}
-                                    className="hidden"
-                                />
+                                    Import JSON
+                                    <input type="file" accept=".json" onChange={importFromJson} className="hidden" />
                                 </label>
                             </div>
                         </div>
 
-                        {/* Project filter for both tasks and notes */}
+                        {/* ── PROJECT TABS ──────────────────────── */}
                         <div className="project-tabs">
                             <button
-                                className={`project-tab ${currentFilter === 'all' ? 'active' : ''}`}
+                                className={'project-tab ' + (currentFilter === 'all' ? 'active' : '')}
                                 onClick={() => setCurrentFilter('all')}
-                            >
-                                All
-                            </button>
-                            {Object.keys(PROJECTS).map(projectId => (
+                            >All</button>
+                            {Object.keys(projects).map(pid => (
                                 <button
-                                key={projectId}
-                                className={`project-tab ${currentFilter === projectId ? 'active' : ''}`}
-                                onClick={() => setCurrentFilter(projectId)}
-                                style={{
-                                    borderLeft: currentFilter !== projectId ? `3px solid ${PROJECTS[projectId].color}` : 'none'
-                                }}
+                                    key={pid}
+                                    className={'project-tab ' + (currentFilter === pid ? 'active' : '')}
+                                    onClick={() => setCurrentFilter(pid)}
+                                    style={{ borderLeft: currentFilter !== pid ? '3px solid ' + projects[pid].color : 'none' }}
                                 >
-                                {PROJECTS[projectId].name}
+                                    {projects[pid].name}
+                                    {pid !== 'other' && (
+                                        <span className="project-delete-x" title={'Delete "' + projects[pid].name + '"'}
+                                            onClick={(e) => { e.stopPropagation(); deleteProject(pid); }}>
+                                            &times;
+                                        </span>
+                                    )}
                                 </button>
                             ))}
+                            <button className="project-tab add-project-tab" onClick={() => setShowAddProject(true)} title="Add new project">
+                                + Project
+                            </button>
+                        </div>
+
+                        {/* ── VIEW TOGGLE ──────────────────────── */}
+                        <div className="view-toggle">
+                            <button className={'view-toggle-btn ' + (activeTab === 'tasks' ? 'active' : '')} onClick={() => setActiveTab('tasks')}>
+                                Tasks
+                            </button>
+                            <button className={'view-toggle-btn ' + (activeTab === 'calendar' ? 'active' : '')} onClick={() => setActiveTab('calendar')}>
+                                Google Calendar
+                            </button>
                         </div>
                         <div className="section-divider"></div>
 
-                        {/* Task and Notes Content */}
-                        <div className="main-content">
-                        <div className="tasks-section">
-                        <div className="content">
-                            {/* Task Grid */}
-                            <div className="task-grid">
-                                {/* Add Task Button */}
-                                <div 
-                                    className="add-task-button"
-                                    onClick={() => {
-
-                                    // Create a blank task object as template
-                                    const blankTask = { 
-                                        id: 'new', 
-                                        name: '', 
-                                        importance: 3, 
-                                        length: 3, 
-                                        difficulty: 3, 
-                                        project: currentFilter === 'all' ? 'other' : currentFilter,
-                                        deadline: ''
-                                    };
-                                    setEditingTask(blankTask);                             
-                                }}
-                                >
-                                    <div className="add-task-icon">+</div>
-                                    <div>Add Task</div>
-                                </div>
-                                {
-                                    filteredTasks.map(task => (
-                                    <div
-                                        id={`task-${task.id}`}
-                                        key={task.id}
-                                        className={`task-item slide-in importance-${task.importance}`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex-1 min-w-0 text-center">  {/* Add text-center here */}
-                                                <h3 className="task-name text-left">  {/* Add text-left to keep title aligned left */}
-                                                    {task.name}
-                                                </h3>
-                                                <div className="priority-container">
-                                                    <span className="priority-badge">
-                                                        {calculatePriority(task)}
-                                                    </span>
-                                                    <span className="project-badge" style={{marginLeft: '0.5rem',
-                                                    backgroundColor: PROJECTS[task.project || 'other'].color || PROJECTS['other'].color1}}>
-                                                        {PROJECTS[task.project || 'other'].name || PROJECTS['other'].name}                                                    
-                                                    </span>
-                                                </div>
-                                                <div className="task-meta justify-center">  {/* Add justify-center */}
-                                                    <span>Importance: {task.importance}</span>
-                                                    <span>Length: {task.length}</span>
-                                                    <span>Difficulty: {task.difficulty}</span>
-                                                </div>
-                                                <div className="task-meta justify-center">  {/* Add justify-center */}
-                                                    Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)
-                                                </div>
-                                                {task.deadline && (
-                                                    <div className="task-meta justify-center">
-                                                        Deadline: {new Date(task.deadline).toLocaleDateString()}
-                                                    </div>
-                                                )}
+                        {/* ═══ TASKS VIEW ══════════════════════════ */}
+                        {activeTab === 'tasks' && (
+                            <div className="main-content">
+                                <div className="tasks-section">
+                                    <div className="content">
+                                        <div className="task-grid">
+                                            <div className="add-task-button" onClick={() => {
+                                                setEditingTask({
+                                                    id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                    project: currentFilter === 'all' ? 'other' : currentFilter, deadline: ''
+                                                });
+                                            }}>
+                                                <div className="add-task-icon">+</div>
+                                                <div>Add Task</div>
                                             </div>
-                                            <div className="action-buttons">
-                                                <button
-                                                    onClick={() => completeTask(task)}
-                                                    className="action-btn complete"
-                                                    title="Complete task"
-                                                >
-                                                    <span style={{ marginTop: '-2px' }}>✔</span>
-                                                </button>
-                                                <button
-                                                    onClick={() => startEditing(task)}
-                                                    className="action-btn edit"
-                                                    title="Edit task"
-                                                >
-                                                    <span style={{ marginTop: '-2px' }}>✎</span>
-                                                </button>
-                                                <button
-                                                    onClick={() => removeTask(task.id)}
-                                                    className="action-btn delete"
-                                                    title="Delete task"
-                                                >
-                                                    <span style={{ marginTop: '-2px' }}>✖</span>
-                                                </button>
+                                            {filteredTasks.map(task => (
+                                                <div id={'task-' + task.id} key={task.id}
+                                                    className={'task-item slide-in importance-' + task.importance}>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex-1 min-w-0 text-center">
+                                                            <h3 className="task-name text-left">{task.name}</h3>
+                                                            <div className="priority-container">
+                                                                <span className="priority-badge">{calculatePriority(task)}</span>
+                                                                <span className="project-badge" style={{
+                                                                    marginLeft: '0.5rem',
+                                                                    backgroundColor: (projects[task.project || 'other'] || projects.other).color
+                                                                }}>
+                                                                    {(projects[task.project || 'other'] || projects.other).name}
+                                                                </span>
+                                                            </div>
+                                                            <div className="task-meta justify-center">
+                                                                <span>Importance: {task.importance}</span>
+                                                                <span>Length: {task.length}</span>
+                                                                <span>Difficulty: {task.difficulty}</span>
+                                                            </div>
+                                                            <div className="task-meta justify-center">
+                                                                Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)
+                                                            </div>
+                                                            {task.deadline && (
+                                                                <div className="task-meta justify-center">
+                                                                    Deadline: {new Date(task.deadline).toLocaleDateString()}
+                                                                    {gcalEventMap[task.id] && (
+                                                                        <span className="gcal-synced-badge" title="Synced to Google Calendar">synced</span>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="action-buttons">
+                                                            <button onClick={() => completeTask(task)} className="action-btn complete" title="Complete task">
+                                                                <span style={{ marginTop: '-2px' }}>&#10004;</span>
+                                                            </button>
+                                                            <button onClick={() => startEditing(task)} className="action-btn edit" title="Edit task">
+                                                                <span style={{ marginTop: '-2px' }}>&#9998;</span>
+                                                            </button>
+                                                            <button onClick={() => removeTask(task.id)} className="action-btn delete" title="Delete task">
+                                                                <span style={{ marginTop: '-2px' }}>&#10006;</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="section-divider"></div>
+
+                                        {/* Completed Tasks */}
+                                        <div>
+                                            <button onClick={() => setShowCompleted(!showCompleted)}
+                                                className="btn w-full flex justify-between items-center">
+                                                <span>Completed Tasks ({filteredCompletedTasks.length})</span>
+                                                <span>{showCompleted ? ' \u25BC ' : ' \u25B6 '}</span>
+                                            </button>
+                                            <div className={'completed-section ' + (showCompleted ? 'open' : '')}>
+                                                <div className="completed-task-grid">
+                                                    {filteredCompletedTasks.map(task => (
+                                                        <div key={task.id} className="task-item completed-task">
+                                                            <div className="flex justify-between items-start">
+                                                                <div>
+                                                                    <div className="task-name">{task.name}</div>
+                                                                    <div className="task-meta">Started: {formatDate(task.createdAt)}</div>
+                                                                    <div className="task-meta">Completed: {formatDate(task.completedAt)}</div>
+                                                                    <div className="priority-container">
+                                                                        <span className="project-badge" style={{
+                                                                            marginLeft: '0.5rem',
+                                                                            backgroundColor: (projects[task.project || 'other'] || projects.other).color
+                                                                        }}>
+                                                                            {(projects[task.project || 'other'] || projects.other).name}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="task-meta">
+                                                                        Importance: {task.importance} | Length: {task.length} | Difficulty: {task.difficulty}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="action-buttons">
+                                                                    <button onClick={() => revertTask(task)} className="action-btn revert" title="Revert to todo">
+                                                                        <span style={{ marginTop: '-2px' }}>&larr;</span>
+                                                                    </button>
+                                                                    <button onClick={() => removeCompletedTask(task.id)} className="action-btn delete" title="Delete">
+                                                                        <span style={{ marginTop: '-2px' }}>&#10006;</span>
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-
-                            <div className="section-divider"></div>
-
-                            {/* Completed Tasks */}
-                            <div>
-                                <button
-                                    onClick={() => setShowCompleted(!showCompleted)}
-                                    className="btn w-full flex justify-between items-center"
-                                >
-                                    <span>Completed Tasks ({filteredCompletedTasks.length})</span>
-                                    <span>{showCompleted ? ' ▼ ' : ' ▶ '}</span>
-                                </button>
-
-                                <div className={`completed-section ${showCompleted ? 'open' : ''}`}>
-                                    <div className="completed-task-grid">
-                                        {filteredCompletedTasks.map(task => (
-                                        <div
-                                            key={task.id}
-                                            className="task-item completed-task"
-                                        >
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <div className="task-name">{task.name}</div>
-                                                    <div className="task-meta">
-                                                        Started: {formatDate(task.createdAt)}
-                                                    </div>
-                                                    <div className="task-meta">
-                                                        Completed: {formatDate(task.completedAt)}
-                                                    </div>
-                                                    <div className="priority-container">
-                                                        <span 
-                                                            className="project-badge" 
-                                                            style={{
-                                                            marginLeft: '0.5rem',
-                                                            backgroundColor: (PROJECTS[task.project || 'other'] && PROJECTS[task.project || 'other'].color) || PROJECTS['other'].color
-                                                            }}
-                                                        >
-                                                            {(PROJECTS[task.project || 'other'] && PROJECTS[task.project || 'other'].name) || PROJECTS['other'].name}
-                                                        </span>
-                                                    </div>
-                                                    <div className="task-meta">
-                                                        Importance: {task.importance} | Length: {task.length} | Difficulty: {task.difficulty}
-                                                    </div>
-                                                </div>
-                                                <div className="action-buttons">
-                                                    <button
-                                                        onClick={() => revertTask(task)}
-                                                        className="action-btn revert"
-                                                        title="Revert to todo"
-                                                    >
-                                                        <span style={{ marginTop: '-2px' }}>↩</span>
-                                                    </button>
-                                                    <button
-                                                        onClick={() => removeCompletedTask(task.id)}
-                                                        className="action-btn delete"
-                                                        title="Delete completed task"
-                                                    >
-                                                        <span style={{ marginTop: '-2px' }}>✖</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        ))}
-                                    </div>
                                 </div>
-                            </div>
-                        </div>
-                        </div>
-                        <div className="notes-section">
-                        <div style={{ padding: '1rem' }}>
-                            {/* Notes textarea with improved styling */}
-                            <div className="notes-container">
-                                <textarea
-                                    value={projectNotes[currentFilter === 'all' ? 'general' : currentFilter] || ''}
-                                    onChange={(e) => {
-                                        const updatedNotes = {...projectNotes};
-                                        updatedNotes[currentFilter === 'all' ? 'general' : currentFilter] = e.target.value;
-                                        setProjectNotes(updatedNotes);
-                                    }}
-                                    className="notes-textarea"
-                                    placeholder="Add notes here..."
-                                />
-                            </div>
-                        </div>
-                        </div>
-                        </div>
-                        {editingTask && (
-                        <div className="edit-overlay" onClick={() => setEditingTask(null)}>
-                            <div className="edit-modal" onClick={e => e.stopPropagation()}>
-                                <h3 className="task-name">Edit Task: {editingTask.name}</h3>
-                                
-                                <input
-                                    type="text"
-                                    value={editingTask.name}
-                                    onChange={(e) => setEditingTask({
-                                        ...editingTask,
-                                        name: e.target.value
-                                    })}
-                                    className="input"
-                                    placeholder={editingTask.id === 'new' ? "Enter new task name..." : ""}
-                                />
-                                
-                                <div className="grid">
-                                    {['Importance', 'Length', 'Difficulty'].map(type => (
-                                        <div key={type} className="slider-container">
-                                            <label className="block text-sm font-medium">
-                                                {type}: {editingTask[type.toLowerCase()]}
-                                            </label>
-                                            <input
-                                                type="range"
-                                                min="1"
-                                                max="5"
-                                                value={editingTask[type.toLowerCase()]}
-                                                onChange={(e) => setEditingTask({
-                                                    ...editingTask,
-                                                    [type.toLowerCase()]: parseInt(e.target.value)
-                                                })}
-                                                className="slider"
-                                                style={{ '--slider-value': `${(editingTask[type.toLowerCase()] - 1) * 25}%` }}
+                                <div className="notes-section">
+                                    <div style={{ padding: '1rem' }}>
+                                        <div className="notes-container">
+                                            <textarea
+                                                value={projectNotes[currentFilter === 'all' ? 'general' : currentFilter] || ''}
+                                                onChange={(e) => {
+                                                    const key = currentFilter === 'all' ? 'general' : currentFilter;
+                                                    setProjectNotes(prev => ({ ...prev, [key]: e.target.value }));
+                                                }}
+                                                className="notes-textarea"
+                                                placeholder="Add notes here..."
                                             />
                                         </div>
-                                    ))}
-                                </div>
-                                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem', width: '100%'}}>
-                                    <div className="slider-container">
-                                        <label className="block text-sm font-medium text-center mb-2">
-                                            Deadline (optional)
-                                        </label>
-                                        <input
-                                            type="date"
-                                            value={editingTask.deadline || ''}
-                                            onChange={(e) => setEditingTask({
-                                                ...editingTask,
-                                                deadline: e.target.value || null
-                                            })}
-                                            className="input text-center"
-                                        />
                                     </div>
-                                    <div className="slider-container">
-                                        <label className="block text-sm font-medium text-center mb-2">
-                                            Project
-                                        </label>
-                                        <select
-                                            value={editingTask.project || 'other'}
-                                            onChange={(e) => setEditingTask({
-                                            ...editingTask,
-                                            project: e.target.value
-                                            })}
-                                            className="input text-center w-full"
-                                        >
-                                            {Object.keys(PROJECTS).map(projectId => (
-                                            <option key={projectId} value={projectId}>
-                                                {PROJECTS[projectId].name}
-                                            </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', gap: '1rem' }}>
-                                    <button 
-                                        onClick={() => setEditingTask(null)}
-                                        className="btn"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button 
-                                        onClick={saveEdit}
-                                        className="btn btn-primary"
-                                    >
-                                        Save Changes
-                                    </button>
                                 </div>
                             </div>
-                        </div>
+                        )}
+
+                        {/* ═══ GOOGLE CALENDAR VIEW ════════════════ */}
+                        {activeTab === 'calendar' && (
+                            <div className="gcal-view">
+                                {/* Sync Control Bar */}
+                                <div className="gcal-control-bar">
+                                    {!gcalClientId ? (
+                                        /* No Client ID yet */
+                                        <div className="gcal-bar-row">
+                                            <span className="gcal-bar-label">Google Calendar not connected</span>
+                                            <button className="btn btn-primary" onClick={openSetup}>Set Up Google Calendar Sync</button>
+                                        </div>
+                                    ) : !gcalSignedIn ? (
+                                        /* Has Client ID but not signed in */
+                                        <div className="gcal-bar-row">
+                                            <span className="gcal-bar-label">Sign in to sync tasks to Google Calendar</span>
+                                            <div className="gcal-bar-actions">
+                                                <button className="btn btn-primary" onClick={signIn} disabled={!apisLoaded}>
+                                                    {apisLoaded ? 'Sign in with Google' : 'Loading...'}
+                                                </button>
+                                                <button className="gcal-settings-btn" onClick={openSetup} title="Settings">&#9881;</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        /* Signed in */
+                                        <div className="gcal-bar-row">
+                                            <div className="gcal-bar-info">
+                                                <span className="gcal-connected-dot"></span>
+                                                <span className="gcal-bar-label">Connected</span>
+                                                {gcalStatus && <span className="gcal-bar-status">{gcalStatus}</span>}
+                                                <span className="gcal-bar-count">
+                                                    {syncedCount}/{tasksWithDeadlines} tasks synced
+                                                </span>
+                                            </div>
+                                            <div className="gcal-bar-actions">
+                                                <button className="btn btn-primary" onClick={syncAllTasks} disabled={gcalSyncing}>
+                                                    {gcalSyncing ? 'Syncing...' : 'Sync All Tasks'}
+                                                </button>
+                                                <button className="btn" onClick={signOut}>Sign Out</button>
+                                                <button className="gcal-settings-btn" onClick={openSetup} title="Settings">&#9881;</button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Google Calendar Embed */}
+                                {gcalEmbedUrl ? (
+                                    <div className="gcal-embed-wrapper">
+                                        <iframe
+                                            key={gcalRefreshKey}
+                                            src={gcalEmbedUrl + (gcalEmbedUrl.includes('?') ? '&' : '?') + '_r=' + gcalRefreshKey}
+                                            className="gcal-iframe"
+                                            frameBorder="0"
+                                            scrolling="no"
+                                            title="Google Calendar"
+                                        ></iframe>
+                                    </div>
+                                ) : (
+                                    <div className="gcal-empty-state">
+                                        <div className="gcal-empty-icon">&#128197;</div>
+                                        <h3>No Calendar Embed URL</h3>
+                                        <p>Add your Google Calendar embed URL to see your calendar here.</p>
+                                        <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={openSetup}>
+                                            Add Calendar URL
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* How it works hint */}
+                                <div className="gcal-hint">
+                                    <strong>How sync works:</strong> Tasks with deadlines are pushed to your Google Calendar as all-day events.
+                                    Creating, editing, completing, or deleting tasks automatically updates your calendar.
+                                    You can also click "Sync All Tasks" to push everything at once.
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ EDIT / ADD TASK MODAL ═══════════════ */}
+                        {editingTask && (
+                            <div className="edit-overlay" onClick={() => setEditingTask(null)}>
+                                <div className="edit-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="task-name">{editingTask.id === 'new' ? 'New Task' : 'Edit: ' + editingTask.name}</h3>
+                                    <input
+                                        type="text"
+                                        value={editingTask.name}
+                                        onChange={(e) => setEditingTask({ ...editingTask, name: e.target.value })}
+                                        className="input"
+                                        placeholder={editingTask.id === 'new' ? "Enter new task name..." : ""}
+                                    />
+                                    <div className="grid">
+                                        {['Importance', 'Length', 'Difficulty'].map(type => (
+                                            <div key={type} className="slider-container">
+                                                <label className="block text-sm font-medium">
+                                                    {type}: {editingTask[type.toLowerCase()]}
+                                                </label>
+                                                <input
+                                                    type="range" min="1" max="5"
+                                                    value={editingTask[type.toLowerCase()]}
+                                                    onChange={(e) => setEditingTask({
+                                                        ...editingTask, [type.toLowerCase()]: parseInt(e.target.value)
+                                                    })}
+                                                    className="slider"
+                                                    style={{ '--slider-value': ((editingTask[type.toLowerCase()] - 1) * 25) + '%' }}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem', width: '100%'}}>
+                                        <div className="slider-container">
+                                            <label className="block text-sm font-medium text-center mb-2">Deadline (optional)</label>
+                                            <input type="date" value={editingTask.deadline || ''}
+                                                onChange={(e) => setEditingTask({ ...editingTask, deadline: e.target.value || null })}
+                                                className="input text-center" />
+                                        </div>
+                                        <div className="slider-container">
+                                            <label className="block text-sm font-medium text-center mb-2">Project</label>
+                                            <select value={editingTask.project || 'other'}
+                                                onChange={(e) => setEditingTask({ ...editingTask, project: e.target.value })}
+                                                className="input text-center w-full">
+                                                {Object.keys(projects).map(pid => (
+                                                    <option key={pid} value={pid}>{projects[pid].name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', gap: '1rem' }}>
+                                        <button onClick={() => setEditingTask(null)} className="btn">Cancel</button>
+                                        <button onClick={saveEdit} className="btn btn-primary">
+                                            {editingTask.id === 'new' ? 'Add Task' : 'Save Changes'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ ADD PROJECT MODAL ═══════════════════ */}
+                        {showAddProject && (
+                            <div className="edit-overlay" onClick={() => setShowAddProject(false)}>
+                                <div className="edit-modal add-project-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="task-name">Add New Project</h3>
+                                    <input type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)}
+                                        className="input" placeholder="Project name..." autoFocus
+                                        onKeyDown={(e) => e.key === 'Enter' && addProject()} />
+                                    <div className="color-picker-section">
+                                        <label className="block text-sm font-medium" style={{ marginBottom: '0.5rem' }}>Choose color:</label>
+                                        <div className="color-grid">
+                                            {PROJECT_COLORS.map(color => (
+                                                <button key={color}
+                                                    className={'color-swatch ' + (newProjectColor === color ? 'selected' : '')}
+                                                    style={{ backgroundColor: color }}
+                                                    onClick={() => setNewProjectColor(color)} />
+                                            ))}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                            <label className="block text-sm font-medium">Custom:</label>
+                                            <input type="color" value={newProjectColor}
+                                                onChange={(e) => setNewProjectColor(e.target.value)} className="color-input-native" />
+                                            <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>{newProjectColor}</span>
+                                        </div>
+                                    </div>
+                                    <div className="project-preview">
+                                        <span>Preview: </span>
+                                        <span className="project-badge" style={{ backgroundColor: newProjectColor }}>
+                                            {newProjectName || 'Project Name'}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', gap: '1rem' }}>
+                                        <button onClick={() => setShowAddProject(false)} className="btn">Cancel</button>
+                                        <button onClick={addProject} className="btn btn-primary">Add Project</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ GOOGLE CALENDAR SETUP MODAL ═════════ */}
+                        {showGcalSetup && (
+                            <div className="edit-overlay" onClick={() => setShowGcalSetup(false)}>
+                                <div className="edit-modal gcal-setup-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="task-name">Google Calendar Setup</h3>
+
+                                    <div className="gcal-setup-section">
+                                        <h4 className="gcal-setup-heading">Step 1: Calendar Embed URL <span className="gcal-optional">(to view your calendar)</span></h4>
+                                        <div className="gcal-instructions">
+                                            <ol>
+                                                <li>Open <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener noreferrer">Google Calendar Settings</a></li>
+                                                <li>Select your calendar on the left sidebar</li>
+                                                <li>Scroll to <strong>"Integrate calendar"</strong></li>
+                                                <li>Copy the <strong>embed code</strong> or <strong>Public URL to this calendar</strong></li>
+                                                <li>Paste below (iframe tag or URL both work)</li>
+                                            </ol>
+                                        </div>
+                                        <textarea
+                                            value={setupEmbedUrl}
+                                            onChange={(e) => setSetupEmbedUrl(e.target.value)}
+                                            className="input"
+                                            placeholder='Paste embed URL or iframe code...'
+                                            rows={2}
+                                            style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }}
+                                        />
+                                    </div>
+
+                                    <div className="gcal-setup-section">
+                                        <h4 className="gcal-setup-heading">Step 2: Google API Client ID <span className="gcal-optional">(to sync tasks as events)</span></h4>
+                                        <div className="gcal-instructions">
+                                            <ol>
+                                                <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console &rarr; Credentials</a></li>
+                                                <li>Create a project (or select an existing one)</li>
+                                                <li>Enable the <strong>Google Calendar API</strong> under "APIs &amp; Services"</li>
+                                                <li>Create an <strong>OAuth 2.0 Client ID</strong> (type: Web application)</li>
+                                                <li>Add your site URL to <strong>Authorized JavaScript origins</strong>
+                                                    <br/><span style={{fontSize: '0.8rem', color: '#6b7280'}}>
+                                                        (e.g. https://yourusername.github.io or http://localhost:port)
+                                                    </span>
+                                                </li>
+                                                <li>Copy the <strong>Client ID</strong> and paste below</li>
+                                            </ol>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={setupClientId}
+                                            onChange={(e) => setSetupClientId(e.target.value)}
+                                            className="input"
+                                            placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
+                                            style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                                        />
+                                    </div>
+
+                                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1.25rem', gap: '1rem' }}>
+                                        <button onClick={() => setShowGcalSetup(false)} className="btn">Cancel</button>
+                                        <button onClick={saveSetup} className="btn btn-primary">Save</button>
+                                    </div>
+                                </div>
+                            </div>
                         )}
                     </div>
                 </div>
