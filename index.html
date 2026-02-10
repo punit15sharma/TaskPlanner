@@ -38,12 +38,21 @@
     <script type="text/babel">
         /* ───────────────── Compact Task Card ──────────────── */
         function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, compact }) {
+            const [expanded, setExpanded] = React.useState(false);
             const proj = projects[task.project || 'other'] || projects.other;
             const color = proj.color;
+
+            const toggle = (e) => {
+                // Don't toggle if clicking a button
+                if (e.target.closest('.tcard-actions')) return;
+                setExpanded(prev => !prev);
+            };
+
             return (
                 <div id={'task-' + task.id}
-                    className={'tcard slide-in' + (compact ? ' tcard-compact' : '')}
-                    style={{ borderLeftColor: color, '--proj-color': color }}>
+                    className={'tcard slide-in' + (compact ? ' tcard-compact' : '') + (expanded ? ' tcard-expanded' : '')}
+                    style={{ borderLeftColor: color, '--proj-color': color }}
+                    onClick={toggle}>
                     <div className="tcard-body">
                         <div className="tcard-header">
                             <span className="tcard-name">{task.name}</span>
@@ -54,15 +63,53 @@
                             {task.deadline && <span className="tcard-deadline">Due {new Date(task.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
                             {gcalEventMap[task.id] && <span className="tcard-synced">synced</span>}
                         </div>
-                        {task.notes && <div className="tcard-notes">{task.notes.length > 60 ? task.notes.slice(0, 60) + '...' : task.notes}</div>}
-                        <div className="tcard-stats">
-                            <span>Imp {task.importance}</span>
-                            <span>Len {task.length}</span>
-                            <span>Diff {task.difficulty}</span>
-                            <span>{getDaysOld(task.createdAt)}d old</span>
-                        </div>
+
+                        {/* Collapsed: truncated notes */}
+                        {!expanded && task.notes && (
+                            <div className="tcard-notes">{task.notes.length > 60 ? task.notes.slice(0, 60) + '...' : task.notes}</div>
+                        )}
+
+                        {/* Collapsed: compact stats */}
+                        {!expanded && (
+                            <div className="tcard-stats">
+                                <span>Imp {task.importance}</span>
+                                <span>Len {task.length}</span>
+                                <span>Diff {task.difficulty}</span>
+                                <span>{getDaysOld(task.createdAt)}d old</span>
+                            </div>
+                        )}
+
+                        {/* Expanded: full details */}
+                        {expanded && (
+                            <div className="tcard-detail">
+                                <div className="tcard-detail-grid">
+                                    <div className="tcard-detail-item">
+                                        <span className="tcard-detail-label">Importance</span>
+                                        <span className="tcard-detail-value">{task.importance}/5</span>
+                                    </div>
+                                    <div className="tcard-detail-item">
+                                        <span className="tcard-detail-label">Length</span>
+                                        <span className="tcard-detail-value">{task.length}/5</span>
+                                    </div>
+                                    <div className="tcard-detail-item">
+                                        <span className="tcard-detail-label">Difficulty</span>
+                                        <span className="tcard-detail-value">{task.difficulty}/5</span>
+                                    </div>
+                                </div>
+                                <div className="tcard-detail-dates">
+                                    <span>Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)</span>
+                                    {task.deadline && <span>Deadline: {new Date(task.deadline).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                                </div>
+                                {task.notes && (
+                                    <div className="tcard-detail-notes">
+                                        <div className="tcard-detail-notes-label">Notes</div>
+                                        <div className="tcard-detail-notes-body">{task.notes}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
-                    <div className="tcard-actions">
+                    <div className="tcard-actions" onClick={e => e.stopPropagation()}>
                         <button onClick={() => onComplete(task)} className="tcard-btn tcard-btn-done" title="Complete">&#10004;</button>
                         <button onClick={() => onEdit(task)} className="tcard-btn tcard-btn-edit" title="Edit">&#9998;</button>
                         <button onClick={() => onDelete(task.id)} className="tcard-btn tcard-btn-del" title="Delete">&#10006;</button>

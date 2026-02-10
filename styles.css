@@ -327,6 +327,73 @@ body {
     margin-top: 0.3rem;
 }
 .tcard-compact .tcard-stats { display: none; }
+
+/* ─── Expanded Card ───────────────────────────────── */
+.tcard { cursor: pointer; }
+.tcard-expanded {
+    box-shadow: var(--shadow-lg);
+    border-left-width: 5px;
+    z-index: 2;
+    position: relative;
+}
+.tcard-expanded .tcard-name { font-size: 1rem; }
+.tcard-expanded.tcard-compact .tcard-stats { display: flex; }
+.tcard-detail { margin-top: 0.5rem; }
+.tcard-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+.tcard-detail-item {
+    background: var(--gray-50);
+    border-radius: var(--radius);
+    padding: 0.35rem 0.5rem;
+    text-align: center;
+}
+.tcard-detail-label {
+    display: block;
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-400);
+}
+.tcard-detail-value {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--gray-700);
+}
+.tcard-detail-dates {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.72rem;
+    color: var(--gray-500);
+    margin-bottom: 0.4rem;
+}
+.tcard-detail-notes {
+    margin-top: 0.35rem;
+    padding: 0.5rem 0.65rem;
+    background: var(--gray-50);
+    border-radius: var(--radius);
+    border-left: 3px solid var(--proj-color, var(--gray-300));
+}
+.tcard-detail-notes-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-400);
+    margin-bottom: 0.25rem;
+}
+.tcard-detail-notes-body {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 .tcard-actions {
     display: flex;
     gap: 0.35rem;
