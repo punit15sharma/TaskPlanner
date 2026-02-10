@@ -8,19 +8,15 @@
     <script src="imports/react-dom.js"></script>
     <script src="imports/babel.js"></script>
     <link rel="stylesheet" href="styles.css">
-    <!-- Google Calendar API -->
     <script async defer src="https://apis.google.com/js/api.js" onload="onGapiLoad()"></script>
     <script async defer src="https://accounts.google.com/gsi/client" onload="onGisLoad()"></script>
 </head>
 <body>
     <div id="root"></div>
     <script src="utils.js"></script>
-
-    <!-- Google API bootstrap (runs before React) -->
     <script>
         var __gapiReady = false, __gisReady = false;
         var __gapiCbs = [], __gisCbs = [];
-
         function onGapiLoad() {
             gapi.load('client', function() {
                 gapi.client.init({}).then(function() {
@@ -32,7 +28,6 @@
                 });
             });
         }
-
         function onGisLoad() {
             __gisReady = true;
             __gisCbs.forEach(function(cb) { cb(); });
@@ -41,371 +36,222 @@
     </script>
 
     <script type="text/babel">
+        /* ───────────────── Compact Task Card ──────────────── */
+        function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, compact }) {
+            const proj = projects[task.project || 'other'] || projects.other;
+            const color = proj.color;
+            return (
+                <div id={'task-' + task.id}
+                    className={'tcard slide-in' + (compact ? ' tcard-compact' : '')}
+                    style={{ borderLeftColor: color, '--proj-color': color }}>
+                    <div className="tcard-body">
+                        <div className="tcard-header">
+                            <span className="tcard-name">{task.name}</span>
+                            <span className="tcard-score">{calculatePriority(task)}</span>
+                        </div>
+                        <div className="tcard-meta">
+                            <span className="tcard-project" style={{ backgroundColor: color }}>{proj.name}</span>
+                            {task.deadline && <span className="tcard-deadline">Due {new Date(task.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
+                            {gcalEventMap[task.id] && <span className="tcard-synced">synced</span>}
+                        </div>
+                        {task.notes && <div className="tcard-notes">{task.notes.length > 60 ? task.notes.slice(0, 60) + '...' : task.notes}</div>}
+                        <div className="tcard-stats">
+                            <span>Imp {task.importance}</span>
+                            <span>Len {task.length}</span>
+                            <span>Diff {task.difficulty}</span>
+                            <span>{getDaysOld(task.createdAt)}d old</span>
+                        </div>
+                    </div>
+                    <div className="tcard-actions">
+                        <button onClick={() => onComplete(task)} className="tcard-btn tcard-btn-done" title="Complete">&#10004;</button>
+                        <button onClick={() => onEdit(task)} className="tcard-btn tcard-btn-edit" title="Edit">&#9998;</button>
+                        <button onClick={() => onDelete(task.id)} className="tcard-btn tcard-btn-del" title="Delete">&#10006;</button>
+                    </div>
+                </div>
+            );
+        }
+
+        /* ───────────────── Main App ───────────────────────── */
         function TaskMatrix() {
-
-            // ─── Core State ─────────────────────────────────────
+            // ─── Core State ─────────────────────────────
             const [tasks, setTasks] = React.useState(() => {
-                const savedTasks = localStorage.getItem('tasks');
-                return savedTasks ? JSON.parse(savedTasks) : [];
+                const s = localStorage.getItem('tasks');
+                return s ? JSON.parse(s) : [];
             });
-
             const [completedTasks, setCompletedTasks] = React.useState(() => {
-                const saved = localStorage.getItem('completedTasks');
-                return saved ? JSON.parse(saved) : [];
+                const s = localStorage.getItem('completedTasks');
+                return s ? JSON.parse(s) : [];
             });
-
             const [showCompleted, setShowCompleted] = React.useState(false);
-
-            const [newTask, setNewTask] = React.useState({
-                name: '', importance: 3, length: 3, difficulty: 3, project: 'other'
-            });
-
             const [currentFilter, setCurrentFilter] = React.useState('all');
             const [activeTab, setActiveTab] = React.useState('tasks');
-
             const [projectNotes, setProjectNotes] = React.useState(() => {
-                const savedNotes = localStorage.getItem('projectNotes');
-                return savedNotes ? JSON.parse(savedNotes) : { 'general': '' };
+                const s = localStorage.getItem('projectNotes');
+                return s ? JSON.parse(s) : { general: '' };
             });
-
-            // ─── Dynamic Projects ───────────────────────────────
             const [projects, setProjects] = React.useState(() => loadProjects());
             const [showAddProject, setShowAddProject] = React.useState(false);
             const [newProjectName, setNewProjectName] = React.useState('');
             const [newProjectColor, setNewProjectColor] = React.useState(PROJECT_COLORS[0]);
+            const [editingTask, setEditingTask] = React.useState(null);
 
-            // ─── Google Calendar State ──────────────────────────
-            const [gcalClientId, setGcalClientId] = React.useState(() =>
-                localStorage.getItem('gcalClientId') || ''
-            );
-            const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() =>
-                localStorage.getItem('gcalEmbedUrl') || ''
-            );
-            const [gcalCalendarId, setGcalCalendarId] = React.useState(() =>
-                localStorage.getItem('gcalCalendarId') || 'primary'
-            );
+            // ─── Google Calendar State ──────────────────
+            const [gcalClientId, setGcalClientId] = React.useState(() => localStorage.getItem('gcalClientId') || '');
+            const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() => localStorage.getItem('gcalEmbedUrl') || '');
+            const [gcalCalendarId, setGcalCalendarId] = React.useState(() => localStorage.getItem('gcalCalendarId') || 'primary');
             const [gcalSignedIn, setGcalSignedIn] = React.useState(false);
-            const [gcalEventMap, setGcalEventMap] = React.useState(() =>
-                JSON.parse(localStorage.getItem('gcalEventMap') || '{}')
-            );
+            const [gcalEventMap, setGcalEventMap] = React.useState(() => JSON.parse(localStorage.getItem('gcalEventMap') || '{}'));
             const [gcalSyncing, setGcalSyncing] = React.useState(false);
             const [gcalStatus, setGcalStatus] = React.useState('');
             const [apisLoaded, setApisLoaded] = React.useState(false);
             const [showGcalSetup, setShowGcalSetup] = React.useState(false);
             const [gcalRefreshKey, setGcalRefreshKey] = React.useState(0);
-
             const tokenClientRef = React.useRef(null);
+            const [setupClientId, setSetupClientId] = React.useState('');
+            const [setupEmbedUrl, setSetupEmbedUrl] = React.useState('');
+            const [setupCalendarId, setSetupCalendarId] = React.useState('');
 
-            // ─── Edit State ─────────────────────────────────────
-            const [editingTask, setEditingTask] = React.useState(null);
-
-            // ─── Google API Initialization ──────────────────────
+            // ─── Google API Init ────────────────────────
             React.useEffect(() => {
-                const check = () => {
-                    if (__gapiReady && __gisReady) setApisLoaded(true);
-                };
-                if (__gapiReady && __gisReady) {
-                    setApisLoaded(true);
-                } else {
-                    if (!__gapiReady) __gapiCbs.push(check);
-                    if (!__gisReady) __gisCbs.push(check);
-                }
+                const check = () => { if (__gapiReady && __gisReady) setApisLoaded(true); };
+                if (__gapiReady && __gisReady) setApisLoaded(true);
+                else { if (!__gapiReady) __gapiCbs.push(check); if (!__gisReady) __gisCbs.push(check); }
             }, []);
-
             React.useEffect(() => {
                 if (apisLoaded && gcalClientId) {
                     tokenClientRef.current = google.accounts.oauth2.initTokenClient({
                         client_id: gcalClientId,
                         scope: 'https://www.googleapis.com/auth/calendar.events',
-                        callback: (resp) => {
-                            if (resp.error) {
-                                setGcalStatus('Auth failed: ' + resp.error);
-                                return;
-                            }
-                            setGcalSignedIn(true);
-                            setGcalStatus('Signed in');
-                        },
+                        callback: (r) => { if (r.error) { setGcalStatus('Auth failed'); return; } setGcalSignedIn(true); setGcalStatus('Signed in'); },
                     });
                 }
             }, [apisLoaded, gcalClientId]);
 
-            // ─── Persistence ────────────────────────────────────
-            React.useEffect(() => {
-                PROJECTS = projects;
-                saveProjects(projects);
-            }, [projects]);
-
+            // ─── Persistence ────────────────────────────
+            React.useEffect(() => { PROJECTS = projects; saveProjects(projects); }, [projects]);
             React.useEffect(() => {
                 localStorage.setItem('tasks', JSON.stringify(tasks));
                 localStorage.setItem('completedTasks', JSON.stringify(completedTasks));
                 localStorage.setItem('projectNotes', JSON.stringify(projectNotes));
             }, [tasks, completedTasks, projectNotes]);
+            React.useEffect(() => { localStorage.setItem('gcalEventMap', JSON.stringify(gcalEventMap)); }, [gcalEventMap]);
 
-            React.useEffect(() => {
-                localStorage.setItem('gcalEventMap', JSON.stringify(gcalEventMap));
-            }, [gcalEventMap]);
-
-            // ─── Google Calendar Helpers ────────────────────────
+            // ─── Google Calendar Helpers ─────────────────
             const isGcalReady = () => gcalSignedIn && gapi && gapi.client && gapi.client.getToken();
-
             const refreshEmbed = () => setGcalRefreshKey(k => k + 1);
-
             const syncOneTask = async (task) => {
                 if (!isGcalReady() || !task.deadline) return null;
-
-                const projName = (projects[task.project] || projects.other).name;
-                const event = {
-                    summary: '[' + projName + '] ' + task.name,
-                    description: 'Importance: ' + task.importance + '/5\nLength: ' + task.length + '/5\nDifficulty: ' + task.difficulty + '/5\nPriority: ' + calculatePriority(task),
-                    start: { date: task.deadline },
-                    end: { date: task.deadline },
-                };
-
+                const pn = (projects[task.project] || projects.other).name;
+                const ev = { summary: '[' + pn + '] ' + task.name, description: 'Imp:' + task.importance + ' Len:' + task.length + ' Diff:' + task.difficulty + (task.notes ? '\n' + task.notes : ''), start: { date: task.deadline }, end: { date: task.deadline } };
                 try {
-                    let resp;
-                    const existingId = gcalEventMap[task.id];
-                    if (existingId) {
-                        try {
-                            resp = await gapi.client.calendar.events.update({
-                                calendarId: gcalCalendarId, eventId: existingId, resource: event
-                            });
-                        } catch (_) {
-                            resp = await gapi.client.calendar.events.insert({
-                                calendarId: gcalCalendarId, resource: event
-                            });
-                        }
-                    } else {
-                        resp = await gapi.client.calendar.events.insert({
-                            calendarId: gcalCalendarId, resource: event
-                        });
-                    }
-                    setGcalEventMap(prev => ({ ...prev, [task.id]: resp.result.id }));
-                    return resp.result.id;
-                } catch (err) {
-                    console.error('Sync error:', task.name, err);
-                    return null;
-                }
+                    let r; const eid = gcalEventMap[task.id];
+                    if (eid) { try { r = await gapi.client.calendar.events.update({ calendarId: gcalCalendarId, eventId: eid, resource: ev }); } catch(_) { r = await gapi.client.calendar.events.insert({ calendarId: gcalCalendarId, resource: ev }); } }
+                    else { r = await gapi.client.calendar.events.insert({ calendarId: gcalCalendarId, resource: ev }); }
+                    setGcalEventMap(p => ({ ...p, [task.id]: r.result.id })); return r.result.id;
+                } catch(e) { return null; }
             };
-
             const removeOneFromGcal = async (taskId) => {
-                if (!isGcalReady()) return;
-                const evId = gcalEventMap[taskId];
-                if (!evId) return;
-                try {
-                    await gapi.client.calendar.events.delete({ calendarId: gcalCalendarId, eventId: evId });
-                } catch (_) { /* may already be gone */ }
-                setGcalEventMap(prev => { const u = { ...prev }; delete u[taskId]; return u; });
+                if (!isGcalReady()) return; const eid = gcalEventMap[taskId]; if (!eid) return;
+                try { await gapi.client.calendar.events.delete({ calendarId: gcalCalendarId, eventId: eid }); } catch(_){}
+                setGcalEventMap(p => { const u = { ...p }; delete u[taskId]; return u; });
             };
-
             const syncAllTasks = async () => {
-                if (!isGcalReady()) return;
-                setGcalSyncing(true);
-                setGcalStatus('Syncing...');
-                const withDeadlines = tasks.filter(t => t.deadline);
-                let ok = 0;
-                for (const t of withDeadlines) {
-                    if (await syncOneTask(t)) ok++;
-                }
-                setGcalSyncing(false);
-                setGcalStatus('Synced ' + ok + ' of ' + withDeadlines.length + ' tasks');
-                refreshEmbed();
+                if (!isGcalReady()) return; setGcalSyncing(true); setGcalStatus('Syncing...');
+                const wd = tasks.filter(t => t.deadline); let ok = 0;
+                for (const t of wd) { if (await syncOneTask(t)) ok++; }
+                setGcalSyncing(false); setGcalStatus('Synced ' + ok + '/' + wd.length); refreshEmbed();
             };
-
-            const signIn = () => {
-                if (tokenClientRef.current) {
-                    tokenClientRef.current.requestAccessToken({ prompt: 'consent' });
-                }
-            };
-
-            const signOut = () => {
-                const tok = gapi.client.getToken();
-                if (tok) {
-                    google.accounts.oauth2.revoke(tok.access_token);
-                    gapi.client.setToken(null);
-                }
-                setGcalSignedIn(false);
-                setGcalStatus('Signed out');
-            };
-
-            // ─── Google Calendar Setup ──────────────────────────
-            const [setupClientId, setSetupClientId] = React.useState('');
-            const [setupEmbedUrl, setSetupEmbedUrl] = React.useState('');
-            const [setupCalendarId, setSetupCalendarId] = React.useState('');
-
-            const openSetup = () => {
-                setSetupClientId(gcalClientId);
-                setSetupEmbedUrl(gcalEmbedUrl);
-                setSetupCalendarId(gcalCalendarId === 'primary' ? '' : gcalCalendarId);
-                setShowGcalSetup(true);
-            };
-
+            const signIn = () => { if (tokenClientRef.current) tokenClientRef.current.requestAccessToken({ prompt: 'consent' }); };
+            const signOut = () => { const t = gapi.client.getToken(); if (t) { google.accounts.oauth2.revoke(t.access_token); gapi.client.setToken(null); } setGcalSignedIn(false); setGcalStatus('Signed out'); };
+            const openSetup = () => { setSetupClientId(gcalClientId); setSetupEmbedUrl(gcalEmbedUrl); setSetupCalendarId(gcalCalendarId === 'primary' ? '' : gcalCalendarId); setShowGcalSetup(true); };
             const saveSetup = () => {
-                const cid = setupClientId.trim();
-                const embed = setupEmbedUrl.trim();
-
-                if (cid) {
-                    setGcalClientId(cid);
-                    localStorage.setItem('gcalClientId', cid);
-                }
-
-                if (embed) {
-                    // Extract src if they paste full iframe tag
-                    const m = embed.match(/src="([^"]+)"/);
-                    const url = m ? m[1] : embed;
-                    setGcalEmbedUrl(url);
-                    localStorage.setItem('gcalEmbedUrl', url);
-                } else {
-                    setGcalEmbedUrl('');
-                    localStorage.removeItem('gcalEmbedUrl');
-                }
-
-                // Calendar ID for syncing events
-                const calId = setupCalendarId.trim();
-                if (calId) {
-                    setGcalCalendarId(calId);
-                    localStorage.setItem('gcalCalendarId', calId);
-                } else {
-                    setGcalCalendarId('primary');
-                    localStorage.setItem('gcalCalendarId', 'primary');
-                }
-
+                const cid = setupClientId.trim(); const embed = setupEmbedUrl.trim();
+                if (cid) { setGcalClientId(cid); localStorage.setItem('gcalClientId', cid); }
+                if (embed) { const m = embed.match(/src="([^"]+)"/); const u = m ? m[1] : embed; setGcalEmbedUrl(u); localStorage.setItem('gcalEmbedUrl', u); } else { setGcalEmbedUrl(''); localStorage.removeItem('gcalEmbedUrl'); }
+                const calId = setupCalendarId.trim(); if (calId) { setGcalCalendarId(calId); localStorage.setItem('gcalCalendarId', calId); } else { setGcalCalendarId('primary'); localStorage.setItem('gcalCalendarId', 'primary'); }
                 setShowGcalSetup(false);
             };
 
-            // ─── Project Management ─────────────────────────────
+            // ─── Project Management ─────────────────────
             const addProject = () => {
-                const trimmed = newProjectName.trim();
-                if (!trimmed) return;
+                const trimmed = newProjectName.trim(); if (!trimmed) return;
                 const id = trimmed.toLowerCase().replace(/\s+/g, '-');
-                if (projects[id]) { alert('A project with this name already exists.'); return; }
-                setProjects(prev => ({ ...prev, [id]: { name: trimmed, color: newProjectColor } }));
-                setNewProjectName('');
-                setNewProjectColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]);
-                setShowAddProject(false);
+                if (projects[id]) { alert('Already exists.'); return; }
+                setProjects(p => ({ ...p, [id]: { name: trimmed, color: newProjectColor } }));
+                setNewProjectName(''); setNewProjectColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]); setShowAddProject(false);
             };
-
             const deleteProject = (pid) => {
                 if (pid === 'other') return;
-                if (!confirm('Delete project "' + projects[pid].name + '"? Tasks move to "Other".')) return;
-                setTasks(prev => prev.map(t => t.project === pid ? { ...t, project: 'other' } : t));
-                setCompletedTasks(prev => prev.map(t => t.project === pid ? { ...t, project: 'other' } : t));
-                setProjects(prev => { const u = { ...prev }; delete u[pid]; return u; });
+                if (!confirm('Delete "' + projects[pid].name + '"? Tasks move to Other.')) return;
+                setTasks(p => p.map(t => t.project === pid ? { ...t, project: 'other' } : t));
+                setCompletedTasks(p => p.map(t => t.project === pid ? { ...t, project: 'other' } : t));
+                setProjects(p => { const u = { ...p }; delete u[pid]; return u; });
                 if (currentFilter === pid) setCurrentFilter('all');
             };
 
-            // ─── Task Operations (with Google Calendar sync) ────
+            // ─── Task CRUD ──────────────────────────────
             const completeTask = (task) => {
-                const el = document.getElementById('task-' + task.id);
-                el.classList.add('celebrate');
+                const el = document.getElementById('task-' + task.id); if (el) el.classList.add('celebrate');
                 setTimeout(() => {
-                    setTasks(prev => prev.filter(t => t.id !== task.id));
-                    setCompletedTasks(prev => [{
-                        ...task, completedAt: new Date().toISOString()
-                    }, ...prev.slice(0, 49)]);
-                    // Remove from Google Calendar when completed
+                    setTasks(p => p.filter(t => t.id !== task.id));
+                    setCompletedTasks(p => [{ ...task, completedAt: new Date().toISOString() }, ...p.slice(0, 49)]);
                     removeOneFromGcal(task.id).then(refreshEmbed);
-                }, 500);
+                }, 400);
             };
-
             const revertTask = (task) => {
-                setCompletedTasks(prev => prev.filter(t => t.id !== task.id));
-                const reverted = { ...task, createdAt: new Date().toISOString() };
-                setTasks(prev => [...prev, reverted]);
-                // Re-sync to Google Calendar
-                if (reverted.deadline) syncOneTask(reverted).then(refreshEmbed);
+                setCompletedTasks(p => p.filter(t => t.id !== task.id));
+                const r = { ...task, createdAt: new Date().toISOString() };
+                setTasks(p => [...p, r]);
+                if (r.deadline) syncOneTask(r).then(refreshEmbed);
             };
-
-            const removeTask = (id) => {
-                setTasks(prev => prev.filter(t => t.id !== id));
-                removeOneFromGcal(id).then(refreshEmbed);
-            };
-
-            const removeCompletedTask = (id) => {
-                setCompletedTasks(prev => prev.filter(t => t.id !== id));
-            };
-
-            const startEditing = (task) => setEditingTask(task);
-
+            const removeTask = (id) => { setTasks(p => p.filter(t => t.id !== id)); removeOneFromGcal(id).then(refreshEmbed); };
+            const removeCompletedTask = (id) => { setCompletedTasks(p => p.filter(t => t.id !== id)); };
+            const startEditing = (task) => setEditingTask({ ...task });
             const saveEdit = () => {
-                let savedTask;
-                if (editingTask.id === 'new') {
-                    savedTask = { ...editingTask, id: Date.now(), createdAt: new Date().toISOString() };
-                    setTasks(prev => [...prev, savedTask]);
-                } else {
-                    savedTask = editingTask;
-                    setTasks(prev => prev.map(t => t.id === editingTask.id ? editingTask : t));
-                }
+                let saved;
+                if (editingTask.id === 'new') { saved = { ...editingTask, id: Date.now(), createdAt: new Date().toISOString() }; setTasks(p => [...p, saved]); }
+                else { saved = editingTask; setTasks(p => p.map(t => t.id === editingTask.id ? editingTask : t)); }
                 setEditingTask(null);
-                // Sync to Google Calendar
-                if (savedTask.deadline) {
-                    syncOneTask(savedTask).then(refreshEmbed);
-                } else {
-                    // If deadline removed, delete from calendar
-                    removeOneFromGcal(savedTask.id).then(refreshEmbed);
-                }
+                if (saved.deadline) syncOneTask(saved).then(refreshEmbed); else removeOneFromGcal(saved.id).then(refreshEmbed);
             };
 
-            // ─── Filtering & Sorting ────────────────────────────
-            const sortedTasks = [...tasks].sort((a, b) => calculatePriority(b) - calculatePriority(a));
-            const filteredTasks = currentFilter === 'all'
-                ? sortedTasks
-                : sortedTasks.filter(task => {
-                    if (currentFilter === 'other') return !task.project || task.project === 'other';
-                    return task.project === currentFilter;
+            // ─── Derived Data ───────────────────────────
+            const sortedAll = [...tasks].sort((a, b) => calculatePriority(b) - calculatePriority(a));
+            const top4 = sortedAll.slice(0, 4);
+            const projectIds = Object.keys(projects);
+
+            const getProjectTasks = (pid) => {
+                return sortedAll.filter(t => {
+                    if (pid === 'other') return !t.project || t.project === 'other';
+                    return t.project === pid;
                 });
+            };
 
-            const filteredCompletedTasks = currentFilter === 'all'
-                ? completedTasks
-                : completedTasks.filter(task => task.project === currentFilter ||
-                    (!task.project && currentFilter === 'other'));
+            const filteredTasks = currentFilter === 'all' ? sortedAll : sortedAll.filter(t => {
+                if (currentFilter === 'other') return !t.project || t.project === 'other';
+                return t.project === currentFilter;
+            });
+            const filteredCompleted = currentFilter === 'all' ? completedTasks : completedTasks.filter(t => t.project === currentFilter || (!t.project && currentFilter === 'other'));
 
-            // ─── JSON Import / Export ───────────────────────────
+            // ─── JSON IO ────────────────────────────────
             const exportToJson = () => {
-                const data = { tasks, completedTasks, projects };
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'tasks-backup-' + new Date().toISOString().split('T')[0] + '.json';
-                a.click();
-                URL.revokeObjectURL(url);
+                const d = { tasks, completedTasks, projects };
+                const b = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+                const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'tasks-' + new Date().toISOString().split('T')[0] + '.json'; a.click(); URL.revokeObjectURL(u);
+            };
+            const importFromJson = (e) => {
+                const f = e.target.files[0]; if (!f) return;
+                const r = new FileReader(); r.onload = (ev) => { try { const d = JSON.parse(ev.target.result); setTasks(d.tasks || []); setCompletedTasks(d.completedTasks || []); if (d.projects) setProjects(p => ({ ...p, ...d.projects, other: p.other })); } catch(_) { alert('Invalid JSON'); } }; r.readAsText(f); e.target.value = '';
             };
 
-            const importFromJson = (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        try {
-                            const data = JSON.parse(e.target.result);
-                            setTasks(data.tasks || []);
-                            setCompletedTasks(data.completedTasks || []);
-                            if (data.projects) {
-                                setProjects(prev => ({
-                                    ...prev, ...data.projects,
-                                    other: prev.other || { name: 'Other', color: '#6b7280' }
-                                }));
-                            }
-                        } catch (_) { alert('Invalid JSON file'); }
-                    };
-                    reader.readAsText(file);
-                }
-                event.target.value = '';
-            };
-
-            // ─── Count synced tasks ─────────────────────────────
             const tasksWithDeadlines = tasks.filter(t => t.deadline).length;
-            const syncedCount = Object.keys(gcalEventMap).filter(id =>
-                tasks.some(t => String(t.id) === id && t.deadline)
-            ).length;
+            const syncedCount = Object.keys(gcalEventMap).filter(id => tasks.some(t => String(t.id) === id && t.deadline)).length;
 
-            // ═════════════════════════════════════════════════════
-            //                     RENDER
-            // ═════════════════════════════════════════════════════
+            // ═════════════════════════════════════════════
             return (
                 <div>
                     <div className="card">
-                        {/* ── HEADER ────────────────────────────── */}
+                        {/* ── HEADER ──────────────────────────── */}
                         <div className="header-container">
                             <div className="header-left">
                                 <h1 className="text-xl font-bold">Task Manager</h1>
@@ -416,435 +262,259 @@
                                 <div className="message-workload">{analyzeWorkload(tasks).workload}</div>
                             </div>
                             <div className="header-right">
-                                <button onClick={() => generateICS(tasks)} className="btn-secondary" title="Download .ics file (works without Google sign-in)">
-                                    Export .ics
-                                </button>
+                                <button onClick={() => generateICS(tasks)} className="btn-secondary" title="Download .ics">Export .ics</button>
                                 <button onClick={exportToJson} className="btn-secondary">Export JSON</button>
-                                <label className="btn-secondary">
-                                    Import JSON
-                                    <input type="file" accept=".json" onChange={importFromJson} className="hidden" />
-                                </label>
+                                <label className="btn-secondary">Import JSON<input type="file" accept=".json" onChange={importFromJson} className="hidden" /></label>
                             </div>
                         </div>
 
-                        {/* ── PROJECT TABS ──────────────────────── */}
+                        {/* ── PROJECT TABS ────────────────────── */}
                         <div className="project-tabs">
-                            <button
-                                className={'project-tab ' + (currentFilter === 'all' ? 'active' : '')}
-                                onClick={() => setCurrentFilter('all')}
-                            >All</button>
-                            {Object.keys(projects).map(pid => (
-                                <button
-                                    key={pid}
-                                    className={'project-tab ' + (currentFilter === pid ? 'active' : '')}
+                            <button className={'project-tab ' + (currentFilter === 'all' ? 'active' : '')} onClick={() => setCurrentFilter('all')}>All</button>
+                            {projectIds.map(pid => (
+                                <button key={pid} className={'project-tab ' + (currentFilter === pid ? 'active' : '')}
                                     onClick={() => setCurrentFilter(pid)}
-                                    style={{ borderLeft: currentFilter !== pid ? '3px solid ' + projects[pid].color : 'none' }}
-                                >
+                                    style={{ borderLeft: currentFilter !== pid ? '3px solid ' + projects[pid].color : 'none' }}>
                                     {projects[pid].name}
-                                    {pid !== 'other' && (
-                                        <span className="project-delete-x" title={'Delete "' + projects[pid].name + '"'}
-                                            onClick={(e) => { e.stopPropagation(); deleteProject(pid); }}>
-                                            &times;
-                                        </span>
-                                    )}
+                                    {pid !== 'other' && <span className="project-delete-x" onClick={e => { e.stopPropagation(); deleteProject(pid); }}>&times;</span>}
                                 </button>
                             ))}
-                            <button className="project-tab add-project-tab" onClick={() => setShowAddProject(true)} title="Add new project">
-                                + Project
-                            </button>
+                            <button className="project-tab add-project-tab" onClick={() => setShowAddProject(true)}>+ Project</button>
                         </div>
 
-                        {/* ── VIEW TOGGLE ──────────────────────── */}
+                        {/* ── VIEW TOGGLE ─────────────────────── */}
                         <div className="view-toggle">
-                            <button className={'view-toggle-btn ' + (activeTab === 'tasks' ? 'active' : '')} onClick={() => setActiveTab('tasks')}>
-                                Tasks
-                            </button>
-                            <button className={'view-toggle-btn ' + (activeTab === 'calendar' ? 'active' : '')} onClick={() => setActiveTab('calendar')}>
-                                Google Calendar
-                            </button>
+                            <button className={'view-toggle-btn ' + (activeTab === 'tasks' ? 'active' : '')} onClick={() => setActiveTab('tasks')}>Tasks</button>
+                            <button className={'view-toggle-btn ' + (activeTab === 'calendar' ? 'active' : '')} onClick={() => setActiveTab('calendar')}>Google Calendar</button>
                         </div>
                         <div className="section-divider"></div>
 
-                        {/* ═══ TASKS VIEW ══════════════════════════ */}
+                        {/* ═══ TASKS VIEW ════════════════════════ */}
                         {activeTab === 'tasks' && (
-                            <div className="main-content">
-                                <div className="tasks-section">
-                                    <div className="content">
-                                        <div className="task-grid">
-                                            <div className="add-task-button" onClick={() => {
-                                                setEditingTask({
-                                                    id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
-                                                    project: currentFilter === 'all' ? 'other' : currentFilter, deadline: ''
-                                                });
-                                            }}>
-                                                <div className="add-task-icon">+</div>
-                                                <div>Add Task</div>
-                                            </div>
-                                            {filteredTasks.map(task => (
-                                                <div id={'task-' + task.id} key={task.id}
-                                                    className={'task-item slide-in importance-' + task.importance}>
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex-1 min-w-0 text-center">
-                                                            <h3 className="task-name text-left">{task.name}</h3>
-                                                            <div className="priority-container">
-                                                                <span className="priority-badge">{calculatePriority(task)}</span>
-                                                                <span className="project-badge" style={{
-                                                                    marginLeft: '0.5rem',
-                                                                    backgroundColor: (projects[task.project || 'other'] || projects.other).color
-                                                                }}>
-                                                                    {(projects[task.project || 'other'] || projects.other).name}
-                                                                </span>
-                                                            </div>
-                                                            <div className="task-meta justify-center">
-                                                                <span>Importance: {task.importance}</span>
-                                                                <span>Length: {task.length}</span>
-                                                                <span>Difficulty: {task.difficulty}</span>
-                                                            </div>
-                                                            <div className="task-meta justify-center">
-                                                                Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)
-                                                            </div>
-                                                            {task.deadline && (
-                                                                <div className="task-meta justify-center">
-                                                                    Deadline: {new Date(task.deadline).toLocaleDateString()}
-                                                                    {gcalEventMap[task.id] && (
-                                                                        <span className="gcal-synced-badge" title="Synced to Google Calendar">synced</span>
-                                                                    )}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                        <div className="action-buttons">
-                                                            <button onClick={() => completeTask(task)} className="action-btn complete" title="Complete task">
-                                                                <span style={{ marginTop: '-2px' }}>&#10004;</span>
-                                                            </button>
-                                                            <button onClick={() => startEditing(task)} className="action-btn edit" title="Edit task">
-                                                                <span style={{ marginTop: '-2px' }}>&#9998;</span>
-                                                            </button>
-                                                            <button onClick={() => removeTask(task.id)} className="action-btn delete" title="Delete task">
-                                                                <span style={{ marginTop: '-2px' }}>&#10006;</span>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
+                            <div className="dashboard-content">
+                                {/* ── TOP PRIORITY ROW ───────────── */}
+                                {top4.length > 0 && (
+                                    <div className="top-priority-section">
+                                        <div className="section-label">Top Priority</div>
+                                        <div className="top-priority-row">
+                                            {top4.map(task => (
+                                                <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
+                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} compact={false} />
                                             ))}
                                         </div>
-
-                                        <div className="section-divider"></div>
-
-                                        {/* Completed Tasks */}
-                                        <div>
-                                            <button onClick={() => setShowCompleted(!showCompleted)}
-                                                className="btn w-full flex justify-between items-center">
-                                                <span>Completed Tasks ({filteredCompletedTasks.length})</span>
-                                                <span>{showCompleted ? ' \u25BC ' : ' \u25B6 '}</span>
-                                            </button>
-                                            <div className={'completed-section ' + (showCompleted ? 'open' : '')}>
-                                                <div className="completed-task-grid">
-                                                    {filteredCompletedTasks.map(task => (
-                                                        <div key={task.id} className="task-item completed-task">
-                                                            <div className="flex justify-between items-start">
-                                                                <div>
-                                                                    <div className="task-name">{task.name}</div>
-                                                                    <div className="task-meta">Started: {formatDate(task.createdAt)}</div>
-                                                                    <div className="task-meta">Completed: {formatDate(task.completedAt)}</div>
-                                                                    <div className="priority-container">
-                                                                        <span className="project-badge" style={{
-                                                                            marginLeft: '0.5rem',
-                                                                            backgroundColor: (projects[task.project || 'other'] || projects.other).color
-                                                                        }}>
-                                                                            {(projects[task.project || 'other'] || projects.other).name}
-                                                                        </span>
-                                                                    </div>
-                                                                    <div className="task-meta">
-                                                                        Importance: {task.importance} | Length: {task.length} | Difficulty: {task.difficulty}
-                                                                    </div>
-                                                                </div>
-                                                                <div className="action-buttons">
-                                                                    <button onClick={() => revertTask(task)} className="action-btn revert" title="Revert to todo">
-                                                                        <span style={{ marginTop: '-2px' }}>&larr;</span>
-                                                                    </button>
-                                                                    <button onClick={() => removeCompletedTask(task.id)} className="action-btn delete" title="Delete">
-                                                                        <span style={{ marginTop: '-2px' }}>&#10006;</span>
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="notes-section">
-                                    <div style={{ padding: '1rem' }}>
-                                        <div className="notes-container">
-                                            <textarea
-                                                value={projectNotes[currentFilter === 'all' ? 'general' : currentFilter] || ''}
-                                                onChange={(e) => {
-                                                    const key = currentFilter === 'all' ? 'general' : currentFilter;
-                                                    setProjectNotes(prev => ({ ...prev, [key]: e.target.value }));
-                                                }}
-                                                className="notes-textarea"
-                                                placeholder="Add notes here..."
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* ═══ GOOGLE CALENDAR VIEW ════════════════ */}
-                        {activeTab === 'calendar' && (
-                            <div className="gcal-view">
-                                {/* Sync Control Bar */}
-                                <div className="gcal-control-bar">
-                                    {!gcalClientId ? (
-                                        /* No Client ID yet */
-                                        <div className="gcal-bar-row">
-                                            <span className="gcal-bar-label">Google Calendar not connected</span>
-                                            <button className="btn btn-primary" onClick={openSetup}>Set Up Google Calendar Sync</button>
-                                        </div>
-                                    ) : !gcalSignedIn ? (
-                                        /* Has Client ID but not signed in */
-                                        <div className="gcal-bar-row">
-                                            <span className="gcal-bar-label">Sign in to sync tasks to Google Calendar</span>
-                                            <div className="gcal-bar-actions">
-                                                <button className="btn btn-primary" onClick={signIn} disabled={!apisLoaded}>
-                                                    {apisLoaded ? 'Sign in with Google' : 'Loading...'}
-                                                </button>
-                                                <button className="gcal-settings-btn" onClick={openSetup} title="Settings">&#9881;</button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        /* Signed in */
-                                        <div className="gcal-bar-row">
-                                            <div className="gcal-bar-info">
-                                                <span className="gcal-connected-dot"></span>
-                                                <span className="gcal-bar-label">Connected</span>
-                                                {gcalStatus && <span className="gcal-bar-status">{gcalStatus}</span>}
-                                                <span className="gcal-bar-count">
-                                                    {syncedCount}/{tasksWithDeadlines} tasks synced
-                                                </span>
-                                            </div>
-                                            <div className="gcal-bar-actions">
-                                                <button className="btn btn-primary" onClick={syncAllTasks} disabled={gcalSyncing}>
-                                                    {gcalSyncing ? 'Syncing...' : 'Sync All Tasks'}
-                                                </button>
-                                                <button className="btn" onClick={signOut}>Sign Out</button>
-                                                <button className="gcal-settings-btn" onClick={openSetup} title="Settings">&#9881;</button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Google Calendar Embed */}
-                                {gcalEmbedUrl ? (
-                                    <div className="gcal-embed-wrapper">
-                                        <iframe
-                                            key={gcalRefreshKey}
-                                            src={gcalEmbedUrl + (gcalEmbedUrl.includes('?') ? '&' : '?') + '_r=' + gcalRefreshKey}
-                                            className="gcal-iframe"
-                                            frameBorder="0"
-                                            scrolling="no"
-                                            title="Google Calendar"
-                                        ></iframe>
-                                    </div>
-                                ) : (
-                                    <div className="gcal-empty-state">
-                                        <div className="gcal-empty-icon">&#128197;</div>
-                                        <h3>No Calendar Embed URL</h3>
-                                        <p>Add your Google Calendar embed URL to see your calendar here.</p>
-                                        <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={openSetup}>
-                                            Add Calendar URL
-                                        </button>
                                     </div>
                                 )}
 
-                                {/* How it works hint */}
-                                <div className="gcal-hint">
-                                    <strong>How sync works:</strong> Tasks with deadlines are pushed to your Google Calendar as all-day events.
-                                    Creating, editing, completing, or deleting tasks automatically updates your calendar.
-                                    You can also click "Sync All Tasks" to push everything at once.
+                                {/* ── PROJECT COLUMNS + NOTES ────── */}
+                                <div className="columns-and-notes">
+                                    <div className="project-columns-area">
+                                        {currentFilter === 'all' ? (
+                                            /* All: show each project as a column */
+                                            <div className="project-columns">
+                                                {projectIds.filter(pid => getProjectTasks(pid).length > 0).map(pid => (
+                                                    <div key={pid} className="project-column">
+                                                        <div className="pcol-header" style={{ backgroundColor: projects[pid].color }}>
+                                                            {projects[pid].name}
+                                                            <span className="pcol-count">{getProjectTasks(pid).length}</span>
+                                                        </div>
+                                                        <div className="pcol-tasks">
+                                                            {getProjectTasks(pid).map(task => (
+                                                                <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
+                                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} compact={true} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {/* Add task column */}
+                                                <div className="project-column add-col">
+                                                    <div className="add-task-card" onClick={() => setEditingTask({
+                                                        id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                        project: 'other', deadline: '', notes: ''
+                                                    })}>
+                                                        <span className="add-icon">+</span>
+                                                        <span>Add Task</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            /* Filtered: show single project tasks as a grid */
+                                            <div>
+                                                <div className="section-label" style={{ color: projects[currentFilter] ? projects[currentFilter].color : undefined }}>
+                                                    {(projects[currentFilter] || projects.other).name} ({filteredTasks.length})
+                                                </div>
+                                                <div className="filtered-grid">
+                                                    <div className="add-task-card" onClick={() => setEditingTask({
+                                                        id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                        project: currentFilter, deadline: '', notes: ''
+                                                    })}>
+                                                        <span className="add-icon">+</span>
+                                                        <span>Add Task</span>
+                                                    </div>
+                                                    {filteredTasks.map(task => (
+                                                        <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
+                                                            onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} compact={false} />
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Completed */}
+                                        <div style={{ marginTop: '1rem' }}>
+                                            <button onClick={() => setShowCompleted(!showCompleted)} className="completed-toggle">
+                                                <span>Completed ({filteredCompleted.length})</span>
+                                                <span>{showCompleted ? '\u25BC' : '\u25B6'}</span>
+                                            </button>
+                                            {showCompleted && (
+                                                <div className="completed-grid">
+                                                    {filteredCompleted.map(task => {
+                                                        const proj = projects[task.project || 'other'] || projects.other;
+                                                        return (
+                                                            <div key={task.id} className="tcard tcard-completed" style={{ borderLeftColor: proj.color }}>
+                                                                <div className="tcard-body">
+                                                                    <div className="tcard-name">{task.name}</div>
+                                                                    <div className="tcard-meta">
+                                                                        <span className="tcard-project" style={{ backgroundColor: proj.color }}>{proj.name}</span>
+                                                                    </div>
+                                                                    <div className="tcard-stats">
+                                                                        <span>Completed {formatDate(task.completedAt)}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="tcard-actions">
+                                                                    <button onClick={() => revertTask(task)} className="tcard-btn tcard-btn-edit" title="Revert">&larr;</button>
+                                                                    <button onClick={() => removeCompletedTask(task.id)} className="tcard-btn tcard-btn-del" title="Delete">&#10006;</button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* ── NOTES SIDEBAR ──────────────── */}
+                                    <div className="notes-sidebar">
+                                        <div className="notes-sidebar-label">Notes</div>
+                                        <textarea
+                                            value={projectNotes[currentFilter === 'all' ? 'general' : currentFilter] || ''}
+                                            onChange={(e) => {
+                                                const k = currentFilter === 'all' ? 'general' : currentFilter;
+                                                setProjectNotes(p => ({ ...p, [k]: e.target.value }));
+                                            }}
+                                            className="notes-textarea"
+                                            placeholder={'Notes for ' + (currentFilter === 'all' ? 'general' : (projects[currentFilter] || projects.other).name) + '...'}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         )}
 
-                        {/* ═══ EDIT / ADD TASK MODAL ═══════════════ */}
+                        {/* ═══ GOOGLE CALENDAR VIEW ══════════════ */}
+                        {activeTab === 'calendar' && (
+                            <div className="gcal-view">
+                                <div className="gcal-control-bar">
+                                    {!gcalClientId ? (
+                                        <div className="gcal-bar-row"><span className="gcal-bar-label">Google Calendar not connected</span><button className="btn btn-primary" onClick={openSetup}>Set Up Sync</button></div>
+                                    ) : !gcalSignedIn ? (
+                                        <div className="gcal-bar-row"><span className="gcal-bar-label">Sign in to sync tasks</span><div className="gcal-bar-actions"><button className="btn btn-primary" onClick={signIn} disabled={!apisLoaded}>{apisLoaded ? 'Sign in with Google' : 'Loading...'}</button><button className="gcal-settings-btn" onClick={openSetup}>&#9881;</button></div></div>
+                                    ) : (
+                                        <div className="gcal-bar-row"><div className="gcal-bar-info"><span className="gcal-connected-dot"></span><span className="gcal-bar-label">Connected</span>{gcalStatus && <span className="gcal-bar-status">{gcalStatus}</span>}<span className="gcal-bar-count">{syncedCount}/{tasksWithDeadlines} synced</span></div><div className="gcal-bar-actions"><button className="btn btn-primary" onClick={syncAllTasks} disabled={gcalSyncing}>{gcalSyncing ? 'Syncing...' : 'Sync All'}</button><button className="btn" onClick={signOut}>Sign Out</button><button className="gcal-settings-btn" onClick={openSetup}>&#9881;</button></div></div>
+                                    )}
+                                </div>
+                                {gcalEmbedUrl ? (
+                                    <div className="gcal-embed-wrapper"><iframe key={gcalRefreshKey} src={gcalEmbedUrl + (gcalEmbedUrl.includes('?') ? '&' : '?') + '_r=' + gcalRefreshKey} className="gcal-iframe" frameBorder="0" scrolling="no" title="Google Calendar"></iframe></div>
+                                ) : (
+                                    <div className="gcal-empty-state"><div className="gcal-empty-icon">&#128197;</div><h3>No Calendar URL</h3><p>Add your Google Calendar embed URL.</p><button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={openSetup}>Add URL</button></div>
+                                )}
+                                <div className="gcal-hint"><strong>How sync works:</strong> Tasks with deadlines become Google Calendar events automatically.</div>
+                            </div>
+                        )}
+
+                        {/* ═══ EDIT / ADD TASK MODAL ═════════════ */}
                         {editingTask && (
                             <div className="edit-overlay" onClick={() => setEditingTask(null)}>
                                 <div className="edit-modal" onClick={e => e.stopPropagation()}>
-                                    <h3 className="task-name">{editingTask.id === 'new' ? 'New Task' : 'Edit: ' + editingTask.name}</h3>
-                                    <input
-                                        type="text"
-                                        value={editingTask.name}
-                                        onChange={(e) => setEditingTask({ ...editingTask, name: e.target.value })}
-                                        className="input"
-                                        placeholder={editingTask.id === 'new' ? "Enter new task name..." : ""}
-                                    />
+                                    <h3 className="modal-title">{editingTask.id === 'new' ? 'New Task' : 'Edit: ' + editingTask.name}</h3>
+                                    <input type="text" value={editingTask.name} onChange={e => setEditingTask({ ...editingTask, name: e.target.value })}
+                                        className="input" placeholder="Task name..." autoFocus />
                                     <div className="grid">
                                         {['Importance', 'Length', 'Difficulty'].map(type => (
                                             <div key={type} className="slider-container">
-                                                <label className="block text-sm font-medium">
-                                                    {type}: {editingTask[type.toLowerCase()]}
-                                                </label>
-                                                <input
-                                                    type="range" min="1" max="5"
-                                                    value={editingTask[type.toLowerCase()]}
-                                                    onChange={(e) => setEditingTask({
-                                                        ...editingTask, [type.toLowerCase()]: parseInt(e.target.value)
-                                                    })}
-                                                    className="slider"
-                                                    style={{ '--slider-value': ((editingTask[type.toLowerCase()] - 1) * 25) + '%' }}
-                                                />
+                                                <label className="slider-label">{type}: {editingTask[type.toLowerCase()]}</label>
+                                                <input type="range" min="1" max="5" value={editingTask[type.toLowerCase()]}
+                                                    onChange={e => setEditingTask({ ...editingTask, [type.toLowerCase()]: parseInt(e.target.value) })}
+                                                    className="slider" style={{ '--slider-value': ((editingTask[type.toLowerCase()] - 1) * 25) + '%' }} />
                                             </div>
                                         ))}
                                     </div>
-                                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1rem', width: '100%'}}>
+                                    <div className="modal-row-2">
                                         <div className="slider-container">
-                                            <label className="block text-sm font-medium text-center mb-2">Deadline (optional)</label>
-                                            <input type="date" value={editingTask.deadline || ''}
-                                                onChange={(e) => setEditingTask({ ...editingTask, deadline: e.target.value || null })}
-                                                className="input text-center" />
+                                            <label className="slider-label">Deadline</label>
+                                            <input type="date" value={editingTask.deadline || ''} onChange={e => setEditingTask({ ...editingTask, deadline: e.target.value || null })} className="input" />
                                         </div>
                                         <div className="slider-container">
-                                            <label className="block text-sm font-medium text-center mb-2">Project</label>
-                                            <select value={editingTask.project || 'other'}
-                                                onChange={(e) => setEditingTask({ ...editingTask, project: e.target.value })}
-                                                className="input text-center w-full">
-                                                {Object.keys(projects).map(pid => (
-                                                    <option key={pid} value={pid}>{projects[pid].name}</option>
-                                                ))}
+                                            <label className="slider-label">Project</label>
+                                            <select value={editingTask.project || 'other'} onChange={e => setEditingTask({ ...editingTask, project: e.target.value })} className="input">
+                                                {projectIds.map(pid => <option key={pid} value={pid}>{projects[pid].name}</option>)}
                                             </select>
                                         </div>
                                     </div>
-                                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', gap: '1rem' }}>
+                                    {/* ── Task Notes ─────────── */}
+                                    <div className="slider-container" style={{ marginTop: '0.5rem' }}>
+                                        <label className="slider-label">Notes</label>
+                                        <textarea value={editingTask.notes || ''} onChange={e => setEditingTask({ ...editingTask, notes: e.target.value })}
+                                            className="input task-notes-input" placeholder="Add notes to this task..." rows={3} />
+                                    </div>
+                                    <div className="modal-actions">
                                         <button onClick={() => setEditingTask(null)} className="btn">Cancel</button>
-                                        <button onClick={saveEdit} className="btn btn-primary">
-                                            {editingTask.id === 'new' ? 'Add Task' : 'Save Changes'}
-                                        </button>
+                                        <button onClick={saveEdit} className="btn btn-primary">{editingTask.id === 'new' ? 'Add Task' : 'Save'}</button>
                                     </div>
                                 </div>
                             </div>
                         )}
 
-                        {/* ═══ ADD PROJECT MODAL ═══════════════════ */}
+                        {/* ═══ ADD PROJECT MODAL ═════════════════ */}
                         {showAddProject && (
                             <div className="edit-overlay" onClick={() => setShowAddProject(false)}>
                                 <div className="edit-modal add-project-modal" onClick={e => e.stopPropagation()}>
-                                    <h3 className="task-name">Add New Project</h3>
-                                    <input type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)}
-                                        className="input" placeholder="Project name..." autoFocus
-                                        onKeyDown={(e) => e.key === 'Enter' && addProject()} />
+                                    <h3 className="modal-title">Add Project</h3>
+                                    <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} className="input" placeholder="Project name..." autoFocus onKeyDown={e => e.key === 'Enter' && addProject()} />
                                     <div className="color-picker-section">
-                                        <label className="block text-sm font-medium" style={{ marginBottom: '0.5rem' }}>Choose color:</label>
+                                        <label className="slider-label" style={{ marginBottom: '0.5rem' }}>Color:</label>
                                         <div className="color-grid">
-                                            {PROJECT_COLORS.map(color => (
-                                                <button key={color}
-                                                    className={'color-swatch ' + (newProjectColor === color ? 'selected' : '')}
-                                                    style={{ backgroundColor: color }}
-                                                    onClick={() => setNewProjectColor(color)} />
-                                            ))}
+                                            {PROJECT_COLORS.map(c => <button key={c} className={'color-swatch ' + (newProjectColor === c ? 'selected' : '')} style={{ backgroundColor: c }} onClick={() => setNewProjectColor(c)} />)}
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
-                                            <label className="block text-sm font-medium">Custom:</label>
-                                            <input type="color" value={newProjectColor}
-                                                onChange={(e) => setNewProjectColor(e.target.value)} className="color-input-native" />
-                                            <span style={{ fontSize: '0.85rem', color: '#6b7280' }}>{newProjectColor}</span>
+                                            <label className="slider-label">Custom:</label>
+                                            <input type="color" value={newProjectColor} onChange={e => setNewProjectColor(e.target.value)} className="color-input-native" />
                                         </div>
                                     </div>
-                                    <div className="project-preview">
-                                        <span>Preview: </span>
-                                        <span className="project-badge" style={{ backgroundColor: newProjectColor }}>
-                                            {newProjectName || 'Project Name'}
-                                        </span>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', gap: '1rem' }}>
-                                        <button onClick={() => setShowAddProject(false)} className="btn">Cancel</button>
-                                        <button onClick={addProject} className="btn btn-primary">Add Project</button>
-                                    </div>
+                                    <div className="project-preview"><span>Preview: </span><span className="tcard-project" style={{ backgroundColor: newProjectColor }}>{newProjectName || 'Name'}</span></div>
+                                    <div className="modal-actions"><button onClick={() => setShowAddProject(false)} className="btn">Cancel</button><button onClick={addProject} className="btn btn-primary">Add</button></div>
                                 </div>
                             </div>
                         )}
 
-                        {/* ═══ GOOGLE CALENDAR SETUP MODAL ═════════ */}
+                        {/* ═══ GCAL SETUP MODAL ══════════════════ */}
                         {showGcalSetup && (
                             <div className="edit-overlay" onClick={() => setShowGcalSetup(false)}>
                                 <div className="edit-modal gcal-setup-modal" onClick={e => e.stopPropagation()}>
-                                    <h3 className="task-name">Google Calendar Setup</h3>
-
+                                    <h3 className="modal-title">Google Calendar Setup</h3>
                                     <div className="gcal-setup-section">
-                                        <h4 className="gcal-setup-heading">Step 1: Calendar Embed URL <span className="gcal-optional">(to view your calendar)</span></h4>
-                                        <div className="gcal-instructions">
-                                            <ol>
-                                                <li>Open <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener noreferrer">Google Calendar Settings</a></li>
-                                                <li>Select your calendar on the left sidebar</li>
-                                                <li>Scroll to <strong>"Integrate calendar"</strong></li>
-                                                <li>Copy the <strong>embed code</strong> or <strong>Public URL to this calendar</strong></li>
-                                                <li>Paste below (iframe tag or URL both work)</li>
-                                            </ol>
-                                        </div>
-                                        <textarea
-                                            value={setupEmbedUrl}
-                                            onChange={(e) => setSetupEmbedUrl(e.target.value)}
-                                            className="input"
-                                            placeholder='Paste embed URL or iframe code...'
-                                            rows={2}
-                                            style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }}
-                                        />
+                                        <h4 className="gcal-setup-heading">1. Embed URL <span className="gcal-optional">(view calendar)</span></h4>
+                                        <div className="gcal-instructions"><ol><li>Open <a href="https://calendar.google.com/calendar/r/settings" target="_blank">Calendar Settings</a></li><li>Select calendar &rarr; Integrate calendar</li><li>Copy embed code or URL</li></ol></div>
+                                        <textarea value={setupEmbedUrl} onChange={e => setSetupEmbedUrl(e.target.value)} className="input" placeholder="Paste embed URL or iframe..." rows={2} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }} />
                                     </div>
-
                                     <div className="gcal-setup-section">
-                                        <h4 className="gcal-setup-heading">Step 2: Calendar ID <span className="gcal-optional">(which calendar to sync tasks to)</span></h4>
-                                        <div className="gcal-instructions">
-                                            <ol>
-                                                <li>In <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener noreferrer">Google Calendar Settings</a>, select the calendar you want tasks synced to</li>
-                                                <li>Scroll to <strong>"Integrate calendar"</strong></li>
-                                                <li>Copy the <strong>Calendar ID</strong>
-                                                    <br/><span style={{fontSize: '0.8rem', color: '#6b7280'}}>
-                                                        (looks like abc123@group.calendar.google.com or your email for the primary calendar)
-                                                    </span>
-                                                </li>
-                                            </ol>
-                                        </div>
-                                        <input
-                                            type="text"
-                                            value={setupCalendarId}
-                                            onChange={(e) => setSetupCalendarId(e.target.value)}
-                                            className="input"
-                                            placeholder="Leave blank to use your primary calendar"
-                                            style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-                                        />
+                                        <h4 className="gcal-setup-heading">2. Calendar ID <span className="gcal-optional">(which calendar)</span></h4>
+                                        <div className="gcal-instructions"><ol><li>In Calendar Settings, select the target calendar</li><li>Copy the <strong>Calendar ID</strong></li></ol></div>
+                                        <input type="text" value={setupCalendarId} onChange={e => setSetupCalendarId(e.target.value)} className="input" placeholder="Leave blank for primary" style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
                                     </div>
-
                                     <div className="gcal-setup-section">
-                                        <h4 className="gcal-setup-heading">Step 3: Google API Client ID <span className="gcal-optional">(to sync tasks as events)</span></h4>
-                                        <div className="gcal-instructions">
-                                            <ol>
-                                                <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console &rarr; Credentials</a></li>
-                                                <li>Create a project (or select an existing one)</li>
-                                                <li>Enable the <strong>Google Calendar API</strong> under "APIs &amp; Services"</li>
-                                                <li>Create an <strong>OAuth 2.0 Client ID</strong> (type: Web application)</li>
-                                                <li>Add your site URL to <strong>Authorized JavaScript origins</strong>
-                                                    <br/><span style={{fontSize: '0.8rem', color: '#6b7280'}}>
-                                                        (e.g. https://yourusername.github.io or http://localhost:port)
-                                                    </span>
-                                                </li>
-                                                <li>Copy the <strong>Client ID</strong> and paste below</li>
-                                            </ol>
-                                        </div>
-                                        <input
-                                            type="text"
-                                            value={setupClientId}
-                                            onChange={(e) => setSetupClientId(e.target.value)}
-                                            className="input"
-                                            placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
-                                            style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
-                                        />
+                                        <h4 className="gcal-setup-heading">3. Client ID <span className="gcal-optional">(API access)</span></h4>
+                                        <div className="gcal-instructions"><ol><li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a></li><li>Enable Calendar API, create OAuth 2.0 Client ID</li><li>Add your site URL to Authorized JS origins</li></ol></div>
+                                        <input type="text" value={setupClientId} onChange={e => setSetupClientId(e.target.value)} className="input" placeholder="123456-xxx.apps.googleusercontent.com" style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
                                     </div>
-
-                                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1.25rem', gap: '1rem' }}>
-                                        <button onClick={() => setShowGcalSetup(false)} className="btn">Cancel</button>
-                                        <button onClick={saveSetup} className="btn btn-primary">Save</button>
-                                    </div>
+                                    <div className="modal-actions"><button onClick={() => setShowGcalSetup(false)} className="btn">Cancel</button><button onClick={saveSetup} className="btn btn-primary">Save</button></div>
                                 </div>
                             </div>
                         )}
@@ -852,7 +522,6 @@
                 </div>
             );
         }
-
         ReactDOM.render(<TaskMatrix />, document.getElementById('root'));
     </script>
 </body>
