@@ -171,6 +171,54 @@
                 localStorage.setItem('appTheme', theme);
             }, [theme]);
 
+            // ─── Project Order State ────────────────────
+            const [projectOrder, setProjectOrder] = React.useState(() => {
+                const saved = localStorage.getItem('projectOrder');
+                return saved ? JSON.parse(saved) : null;
+            });
+
+            React.useEffect(() => {
+                if (projectOrder) localStorage.setItem('projectOrder', JSON.stringify(projectOrder));
+            }, [projectOrder]);
+
+            // Drag state for column reordering
+            const [draggedCol, setDraggedCol] = React.useState(null);
+            const [dragOverCol, setDragOverCol] = React.useState(null);
+
+            // ─── Resize State ───────────────────────────
+            const [notesPanelWidth, setNotesPanelWidth] = React.useState(() => {
+                return parseInt(localStorage.getItem('notesPanelWidth')) || 260;
+            });
+            const resizingRef = React.useRef(false);
+            const containerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                localStorage.setItem('notesPanelWidth', notesPanelWidth);
+            }, [notesPanelWidth]);
+
+            // Resize handler
+            const startResize = React.useCallback((e) => {
+                e.preventDefault();
+                resizingRef.current = true;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                const onMove = (ev) => {
+                    if (!resizingRef.current || !containerRef.current) return;
+                    const rect = containerRef.current.getBoundingClientRect();
+                    const newWidth = Math.max(140, Math.min(500, rect.right - ev.clientX));
+                    setNotesPanelWidth(newWidth);
+                };
+                const onUp = () => {
+                    resizingRef.current = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            }, []);
+
             // ─── Google Calendar State ──────────────────
             const [gcalClientId, setGcalClientId] = React.useState(() => localStorage.getItem('gcalClientId') || '');
             const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() => localStorage.getItem('gcalEmbedUrl') || '');
@@ -254,6 +302,14 @@
                 const id = trimmed.toLowerCase().replace(/\s+/g, '-');
                 if (projects[id]) { alert('Already exists.'); return; }
                 setProjects(p => ({ ...p, [id]: { name: trimmed, color: newProjectColor } }));
+                // Append new project to order (before 'other' if possible)
+                setProjectOrder(prev => {
+                    const order = prev ? [...prev] : [...rawProjectIds];
+                    const otherIdx = order.indexOf('other');
+                    if (otherIdx >= 0) order.splice(otherIdx, 0, id);
+                    else order.push(id);
+                    return order;
+                });
                 setNewProjectName(''); setNewProjectColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]); setShowAddProject(false);
             };
             const deleteProject = (pid) => {
@@ -262,6 +318,7 @@
                 setTasks(p => p.map(t => t.project === pid ? { ...t, project: 'other' } : t));
                 setCompletedTasks(p => p.map(t => t.project === pid ? { ...t, project: 'other' } : t));
                 setProjects(p => { const u = { ...p }; delete u[pid]; return u; });
+                setProjectOrder(prev => prev ? prev.filter(id => id !== pid) : null);
                 if (currentFilter === pid) setCurrentFilter('all');
             };
 
@@ -294,7 +351,31 @@
             // ─── Derived Data ───────────────────────────
             const sortedAll = [...tasks].sort((a, b) => calculatePriority(b) - calculatePriority(a));
             const top4 = sortedAll.slice(0, 4);
-            const projectIds = Object.keys(projects);
+            const rawProjectIds = Object.keys(projects);
+
+            // Use saved order, but sync with actual projects (remove deleted, append new)
+            const projectIds = React.useMemo(() => {
+                if (!projectOrder) return rawProjectIds;
+                const ordered = projectOrder.filter(id => rawProjectIds.includes(id));
+                const missing = rawProjectIds.filter(id => !ordered.includes(id));
+                return [...ordered, ...missing];
+            }, [projectOrder, rawProjectIds.join(',')]);
+
+            // Column reorder helpers
+            const onColDragStart = (pid) => setDraggedCol(pid);
+            const onColDragOver = (e, pid) => { e.preventDefault(); if (pid !== draggedCol) setDragOverCol(pid); };
+            const onColDrop = (pid) => {
+                if (!draggedCol || draggedCol === pid) { setDraggedCol(null); setDragOverCol(null); return; }
+                const order = [...projectIds];
+                const fromIdx = order.indexOf(draggedCol);
+                const toIdx = order.indexOf(pid);
+                order.splice(fromIdx, 1);
+                order.splice(toIdx, 0, draggedCol);
+                setProjectOrder(order);
+                setDraggedCol(null);
+                setDragOverCol(null);
+            };
+            const onColDragEnd = () => { setDraggedCol(null); setDragOverCol(null); };
 
             const getProjectTasks = (pid) => {
                 return sortedAll.filter(t => {
@@ -366,7 +447,13 @@
                         <div className="project-tabs">
                             <button className={'project-tab ' + (currentFilter === 'all' ? 'active' : '')} onClick={() => setCurrentFilter('all')}>All</button>
                             {projectIds.map(pid => (
-                                <button key={pid} className={'project-tab ' + (currentFilter === pid ? 'active' : '')}
+                                <button key={pid}
+                                    className={'project-tab ' + (currentFilter === pid ? 'active' : '') + (draggedCol === pid ? ' ptab-dragging' : '') + (dragOverCol === pid ? ' ptab-drag-over' : '')}
+                                    draggable
+                                    onDragStart={() => onColDragStart(pid)}
+                                    onDragOver={(e) => onColDragOver(e, pid)}
+                                    onDrop={() => onColDrop(pid)}
+                                    onDragEnd={onColDragEnd}
                                     onClick={() => setCurrentFilter(pid)}
                                     style={{ borderLeft: currentFilter !== pid ? '3px solid ' + projects[pid].color : 'none' }}>
                                     {projects[pid].name}
@@ -400,14 +487,21 @@
                                 )}
 
                                 {/* ── PROJECT COLUMNS + NOTES ────── */}
-                                <div className="columns-and-notes">
+                                <div className="columns-and-notes" ref={containerRef}>
                                     <div className="project-columns-area">
                                         {currentFilter === 'all' ? (
                                             /* All: show each project as a column */
                                             <div className="project-columns">
                                                 {projectIds.filter(pid => getProjectTasks(pid).length > 0).map(pid => (
-                                                    <div key={pid} className="project-column">
+                                                    <div key={pid}
+                                                        className={'project-column' + (draggedCol === pid ? ' pcol-dragging' : '') + (dragOverCol === pid ? ' pcol-drag-over' : '')}
+                                                        draggable
+                                                        onDragStart={() => onColDragStart(pid)}
+                                                        onDragOver={(e) => onColDragOver(e, pid)}
+                                                        onDrop={() => onColDrop(pid)}
+                                                        onDragEnd={onColDragEnd}>
                                                         <div className="pcol-header" style={{ backgroundColor: projects[pid].color }}>
+                                                            <span className="pcol-drag-handle" title="Drag to reorder">&#9776;</span>
                                                             {projects[pid].name}
                                                             <span className="pcol-count">{getProjectTasks(pid).length}</span>
                                                         </div>
@@ -485,8 +579,13 @@
                                         </div>
                                     </div>
 
+                                    {/* ── RESIZE HANDLE ─────────────── */}
+                                    <div className="resize-handle" onMouseDown={startResize} title="Drag to resize">
+                                        <div className="resize-handle-bar"></div>
+                                    </div>
+
                                     {/* ── NOTES SIDEBAR ──────────────── */}
-                                    <div className="notes-sidebar">
+                                    <div className="notes-sidebar" style={{ width: notesPanelWidth, minWidth: notesPanelWidth, maxWidth: notesPanelWidth }}>
                                         <div className="notes-sidebar-label">Notes</div>
                                         <textarea
                                             value={projectNotes[currentFilter === 'all' ? 'general' : currentFilter] || ''}

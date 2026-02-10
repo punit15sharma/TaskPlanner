@@ -158,6 +158,10 @@ body {
 .add-project-tab:hover { border-color: var(--primary) !important; color: var(--primary) !important; background: rgba(37,99,235,0.04) !important; }
 .project-delete-x { display: inline-block; margin-left: 0.35rem; font-size: 0.95rem; color: var(--gray-400); cursor: pointer; }
 .project-delete-x:hover { color: var(--danger); }
+.project-tab[draggable] { cursor: grab; }
+.project-tab[draggable]:active { cursor: grabbing; }
+.ptab-dragging { opacity: 0.4; }
+.ptab-drag-over { box-shadow: 0 0 0 2px var(--primary); transform: scale(1.04); }
 
 /* ─── View Toggle ─────────────────────────────────── */
 .view-toggle {
@@ -196,15 +200,13 @@ body {
 /* ─── Columns + Notes ─────────────────────────────── */
 .columns-and-notes {
     display: flex;
-    gap: 1rem;
+    gap: 0;
+    align-items: stretch;
 }
-.project-columns-area { flex: 3; min-width: 0; }
+.project-columns-area { flex: 1; min-width: 0; }
 .notes-sidebar {
-    flex: 1;
-    min-width: 200px;
-    max-width: 280px;
-    border-left: 1px solid var(--gray-200);
-    padding-left: 1rem;
+    flex-shrink: 0;
+    padding-left: 0.75rem;
 }
 .notes-sidebar-label {
     font-size: 0.75rem;
@@ -227,6 +229,38 @@ body {
     background: var(--gray-50);
 }
 .notes-textarea:focus { outline: none; border-color: var(--primary); }
+
+/* ─── Resize Handle ──────────────────────────────── */
+.resize-handle {
+    width: 12px;
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 5;
+    user-select: none;
+}
+.resize-handle:hover .resize-handle-bar,
+.resize-handle:active .resize-handle-bar {
+    background: var(--primary);
+    opacity: 0.7;
+}
+.resize-handle-bar {
+    width: 3px;
+    height: 40px;
+    border-radius: 3px;
+    background: var(--gray-300);
+    transition: background 0.15s, opacity 0.15s, height 0.15s;
+}
+.resize-handle:hover .resize-handle-bar {
+    height: 60px;
+}
+.resize-handle:active .resize-handle-bar {
+    height: 80px;
+    opacity: 1;
+}
 
 /* ─── Project Columns ─────────────────────────────── */
 .project-columns {
@@ -258,14 +292,36 @@ body {
     font-size: 0.8rem;
     font-weight: 600;
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 0.35rem;
 }
+.pcol-drag-handle {
+    cursor: grab;
+    opacity: 0.6;
+    font-size: 0.75rem;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+.pcol-drag-handle:hover { opacity: 1; }
+.pcol-header:active .pcol-drag-handle { cursor: grabbing; }
 .pcol-count {
     background: rgba(255,255,255,0.25);
     padding: 0.1rem 0.45rem;
     border-radius: 9999px;
     font-size: 0.7rem;
+    margin-left: auto;
+}
+
+/* ─── Column Drag & Drop ─────────────────────────── */
+.project-column[draggable] { cursor: default; transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s; }
+.pcol-dragging {
+    opacity: 0.5;
+    transform: scale(0.97);
+    box-shadow: none !important;
+}
+.pcol-drag-over {
+    box-shadow: inset 0 0 0 2px var(--primary), var(--shadow-md);
+    transform: scale(1.01);
 }
 .pcol-tasks {
     padding: 0.5rem;
@@ -653,7 +709,8 @@ body {
 @media (max-width: 900px) {
     .top-priority-row { grid-template-columns: repeat(2, 1fr); }
     .columns-and-notes { flex-direction: column; }
-    .notes-sidebar { max-width: 100%; border-left: none; padding-left: 0; border-top: 1px solid var(--gray-200); padding-top: 1rem; }
+    .resize-handle { display: none; }
+    .notes-sidebar { max-width: 100% !important; width: 100% !important; min-width: 100% !important; border-left: none; padding-left: 0; border-top: 1px solid var(--gray-200); padding-top: 1rem; }
     .project-columns { flex-wrap: wrap; }
     .project-column { min-width: 160px; }
     .filtered-grid { grid-template-columns: repeat(2, 1fr); }
@@ -722,4 +779,8 @@ body {
     select.input { background: #2a2a2a; color: #ddd; }
     .theme-picker { background: #252525; border-color: #3a3a3a; }
     .theme-active { border-color: #eee; box-shadow: 0 0 0 2px #1e1e1e, 0 0 0 4px #eee; }
+    .resize-handle-bar { background: #555; }
+    .resize-handle:hover .resize-handle-bar { background: var(--primary-light); }
+    .pcol-drag-over { box-shadow: inset 0 0 0 2px var(--primary-light), var(--shadow-md); }
+    .ptab-drag-over { box-shadow: 0 0 0 2px var(--primary-light); }
 }
