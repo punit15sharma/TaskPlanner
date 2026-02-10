@@ -52,32 +52,81 @@ body {
     grid-template-columns: 1fr 2fr 1fr;
     align-items: center;
     gap: 1rem;
-    padding: 1rem 1.25rem;
-    background: linear-gradient(135deg, var(--primary-light), var(--primary));
+    padding: 1.1rem 1.5rem;
     color: white;
+    position: relative;
 }
 .header-left { text-align: left; }
-.header-left h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; }
+.header-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
 .header-center { text-align: center; }
-.header-right { display: flex; justify-content: flex-end; gap: 0.4rem; }
+.header-right { display: flex; justify-content: flex-end; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 
 .workload-message { padding: 0; margin: 0; text-align: center; }
-.message-main { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem; }
-.message-advice { font-size: 0.85rem; opacity: 0.85; margin-bottom: 0.15rem; }
-.message-workload { font-size: 0.8rem; color: #fca5a5; }
+.message-main { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.25rem; text-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+.message-advice { font-size: 0.82rem; opacity: 0.9; margin-bottom: 0.15rem; }
+.message-workload { font-size: 0.78rem; color: rgba(255,255,255,0.7); }
 
 .btn-secondary {
     background: rgba(255,255,255,0.12);
     color: white;
-    font-size: 0.78rem;
-    padding: 0.4rem 0.75rem;
+    font-size: 0.76rem;
+    padding: 0.38rem 0.7rem;
     border-radius: var(--radius);
     border: 1px solid rgba(255,255,255,0.2);
     cursor: pointer;
     transition: all 0.15s;
+    backdrop-filter: blur(4px);
 }
-.btn-secondary:hover { background: rgba(255,255,255,0.22); }
+.btn-secondary:hover { background: rgba(255,255,255,0.25); }
+.theme-toggle-btn { font-size: 0.78rem; }
 .hidden { display: none; }
+
+/* ─── Theme Picker ────────────────────────────────── */
+.theme-picker {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-200);
+    animation: slideIn 0.2s ease-out;
+}
+.theme-swatch {
+    width: 72px;
+    height: 38px;
+    border-radius: var(--radius);
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 3px;
+    position: relative;
+    overflow: hidden;
+}
+.theme-swatch:hover {
+    transform: scale(1.08);
+    box-shadow: var(--shadow-md);
+}
+.theme-active {
+    border-color: var(--gray-800);
+    box-shadow: 0 0 0 2px white, 0 0 0 4px var(--gray-800);
+    transform: scale(1.05);
+}
+.theme-swatch-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: white;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    letter-spacing: 0.02em;
+}
 
 /* ─── Project Tabs ────────────────────────────────── */
 .project-tabs {
@@ -671,4 +720,6 @@ body {
     .btn { background: #2a2a2a; border-color: #444; color: #ddd; }
     .btn:hover { background: #333; }
     select.input { background: #2a2a2a; color: #ddd; }
+    .theme-picker { background: #252525; border-color: #3a3a3a; }
+    .theme-active { border-color: #eee; box-shadow: 0 0 0 2px #1e1e1e, 0 0 0 4px #eee; }
 }

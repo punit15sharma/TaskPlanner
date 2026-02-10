@@ -118,6 +118,20 @@
             );
         }
 
+        /* ───────────────── Theme Definitions ───────────────── */
+        const THEMES = {
+            ocean:    { name: 'Ocean',    gradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',     primary: '#2563eb', primaryLight: '#3b82f6', primaryDark: '#1d4ed8' },
+            sunset:   { name: 'Sunset',   gradient: 'linear-gradient(135deg, #f97316, #dc2626)',     primary: '#ea580c', primaryLight: '#f97316', primaryDark: '#c2410c' },
+            forest:   { name: 'Forest',   gradient: 'linear-gradient(135deg, #22c55e, #15803d)',     primary: '#16a34a', primaryLight: '#22c55e', primaryDark: '#15803d' },
+            lavender: { name: 'Lavender', gradient: 'linear-gradient(135deg, #a78bfa, #7c3aed)',     primary: '#8b5cf6', primaryLight: '#a78bfa', primaryDark: '#7c3aed' },
+            midnight: { name: 'Midnight', gradient: 'linear-gradient(135deg, #6366f1, #312e81)',     primary: '#4f46e5', primaryLight: '#6366f1', primaryDark: '#3730a3' },
+            rose:     { name: 'Rose',     gradient: 'linear-gradient(135deg, #fb7185, #be123c)',     primary: '#e11d48', primaryLight: '#fb7185', primaryDark: '#be123c' },
+            teal:     { name: 'Teal',     gradient: 'linear-gradient(135deg, #2dd4bf, #0d9488)',     primary: '#14b8a6', primaryLight: '#2dd4bf', primaryDark: '#0d9488' },
+            slate:    { name: 'Slate',    gradient: 'linear-gradient(135deg, #64748b, #334155)',     primary: '#475569', primaryLight: '#64748b', primaryDark: '#334155' },
+            amber:    { name: 'Amber',    gradient: 'linear-gradient(135deg, #fbbf24, #d97706)',     primary: '#d97706', primaryLight: '#fbbf24', primaryDark: '#b45309' },
+            cyber:    { name: 'Cyber',    gradient: 'linear-gradient(135deg, #06b6d4, #6366f1)',     primary: '#0891b2', primaryLight: '#06b6d4', primaryDark: '#6366f1' },
+        };
+
         /* ───────────────── Main App ───────────────────────── */
         function TaskMatrix() {
             // ─── Core State ─────────────────────────────
@@ -141,6 +155,21 @@
             const [newProjectName, setNewProjectName] = React.useState('');
             const [newProjectColor, setNewProjectColor] = React.useState(PROJECT_COLORS[0]);
             const [editingTask, setEditingTask] = React.useState(null);
+
+            // ─── Theme State ────────────────────────────
+            const [theme, setTheme] = React.useState(() => localStorage.getItem('appTheme') || 'ocean');
+            const [showThemePicker, setShowThemePicker] = React.useState(false);
+
+            const currentTheme = THEMES[theme] || THEMES.ocean;
+
+            // Apply theme CSS variables to document
+            React.useEffect(() => {
+                const root = document.documentElement;
+                root.style.setProperty('--primary', currentTheme.primary);
+                root.style.setProperty('--primary-light', currentTheme.primaryLight);
+                root.style.setProperty('--primary-dark', currentTheme.primaryDark);
+                localStorage.setItem('appTheme', theme);
+            }, [theme]);
 
             // ─── Google Calendar State ──────────────────
             const [gcalClientId, setGcalClientId] = React.useState(() => localStorage.getItem('gcalClientId') || '');
@@ -299,9 +328,9 @@
                 <div>
                     <div className="card">
                         {/* ── HEADER ──────────────────────────── */}
-                        <div className="header-container">
+                        <div className="header-container" style={{ background: currentTheme.gradient }}>
                             <div className="header-left">
-                                <h1 className="text-xl font-bold">Task Manager</h1>
+                                <h1 className="header-title">Task Manager</h1>
                             </div>
                             <div className="header-center workload-message">
                                 <div className="message-main">{analyzeWorkload(tasks).message}</div>
@@ -309,11 +338,29 @@
                                 <div className="message-workload">{analyzeWorkload(tasks).workload}</div>
                             </div>
                             <div className="header-right">
+                                <button onClick={() => setShowThemePicker(!showThemePicker)} className="btn-secondary theme-toggle-btn" title="Change theme">
+                                    &#9783; Theme
+                                </button>
                                 <button onClick={() => generateICS(tasks)} className="btn-secondary" title="Download .ics">Export .ics</button>
                                 <button onClick={exportToJson} className="btn-secondary">Export JSON</button>
                                 <label className="btn-secondary">Import JSON<input type="file" accept=".json" onChange={importFromJson} className="hidden" /></label>
                             </div>
                         </div>
+
+                        {/* ── THEME PICKER ────────────────────── */}
+                        {showThemePicker && (
+                            <div className="theme-picker">
+                                {Object.entries(THEMES).map(([id, t]) => (
+                                    <button key={id}
+                                        className={'theme-swatch' + (theme === id ? ' theme-active' : '')}
+                                        style={{ background: t.gradient }}
+                                        onClick={() => { setTheme(id); setShowThemePicker(false); }}
+                                        title={t.name}>
+                                        <span className="theme-swatch-label">{t.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
 
                         {/* ── PROJECT TABS ────────────────────── */}
                         <div className="project-tabs">
