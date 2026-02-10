@@ -484,13 +484,33 @@ body {
     border-radius: var(--radius);
     border-left: 3px solid var(--proj-color, var(--gray-300));
 }
+.tcard-detail-notes-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.25rem;
+}
 .tcard-detail-notes-label {
     font-size: 0.65rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--gray-400);
-    margin-bottom: 0.25rem;
+}
+.tcard-notes-edit-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--gray-400);
+    padding: 0.1rem 0.3rem;
+    border-radius: var(--radius);
+    transition: all 0.15s;
+    line-height: 1;
+}
+.tcard-notes-edit-btn:hover {
+    color: var(--primary);
+    background: rgba(37,99,235,0.08);
 }
 .tcard-detail-notes-body {
     font-size: 0.8rem;
@@ -498,6 +518,38 @@ body {
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
+}
+.tcard-notes-clickable {
+    cursor: text;
+    min-height: 1.5em;
+    border-radius: 4px;
+    padding: 0.2rem 0.25rem;
+    margin: -0.2rem -0.25rem;
+    transition: background 0.15s;
+}
+.tcard-notes-clickable:hover {
+    background: rgba(0,0,0,0.04);
+}
+.tcard-notes-placeholder {
+    color: var(--gray-400);
+    font-style: italic;
+    font-size: 0.78rem;
+}
+.tcard-notes-textarea {
+    width: 100%;
+    min-height: 60px;
+    padding: 0.4rem 0.5rem;
+    border: 1.5px solid var(--primary);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+    background: white;
+    color: var(--gray-700);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 .tcard-actions {
     display: flex;
@@ -783,4 +835,8 @@ body {
     .resize-handle:hover .resize-handle-bar { background: var(--primary-light); }
     .pcol-drag-over { box-shadow: inset 0 0 0 2px var(--primary-light), var(--shadow-md); }
     .ptab-drag-over { box-shadow: 0 0 0 2px var(--primary-light); }
+    .tcard-notes-textarea { background: #2a2a2a; color: #ddd; border-color: var(--primary-light); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    .tcard-notes-clickable:hover { background: rgba(255,255,255,0.05); }
+    .tcard-notes-placeholder { color: #666; }
+    .tcard-notes-edit-btn:hover { color: var(--primary-light); background: rgba(59,130,246,0.12); }
 }

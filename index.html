@@ -37,15 +37,34 @@
 
     <script type="text/babel">
         /* ───────────────── Compact Task Card ──────────────── */
-        function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, compact }) {
+        function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, onUpdateNotes, compact }) {
             const [expanded, setExpanded] = React.useState(false);
+            const [editingNotes, setEditingNotes] = React.useState(false);
+            const [localNotes, setLocalNotes] = React.useState(task.notes || '');
+            const notesRef = React.useRef(null);
             const proj = projects[task.project || 'other'] || projects.other;
             const color = proj.color;
 
+            // Keep local notes in sync if task changes externally
+            React.useEffect(() => { setLocalNotes(task.notes || ''); }, [task.notes]);
+
             const toggle = (e) => {
-                // Don't toggle if clicking a button
                 if (e.target.closest('.tcard-actions')) return;
+                if (e.target.closest('.tcard-detail-notes')) return;
                 setExpanded(prev => !prev);
+            };
+
+            const startNotesEdit = (e) => {
+                e.stopPropagation();
+                setEditingNotes(true);
+                setTimeout(() => { if (notesRef.current) notesRef.current.focus(); }, 50);
+            };
+
+            const saveNotes = () => {
+                setEditingNotes(false);
+                if (localNotes !== (task.notes || '') && onUpdateNotes) {
+                    onUpdateNotes(task.id, localNotes);
+                }
             };
 
             return (
@@ -100,12 +119,30 @@
                                     <span>Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)</span>
                                     {task.deadline && <span>Deadline: {new Date(task.deadline).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
                                 </div>
-                                {task.notes && (
-                                    <div className="tcard-detail-notes">
-                                        <div className="tcard-detail-notes-label">Notes</div>
-                                        <div className="tcard-detail-notes-body">{task.notes}</div>
+                                <div className="tcard-detail-notes" onClick={e => e.stopPropagation()}>
+                                    <div className="tcard-detail-notes-header">
+                                        <span className="tcard-detail-notes-label">Notes</span>
+                                        {!editingNotes && (
+                                            <button className="tcard-notes-edit-btn" onClick={startNotesEdit} title="Edit notes">&#9998;</button>
+                                        )}
                                     </div>
-                                )}
+                                    {editingNotes ? (
+                                        <textarea
+                                            ref={notesRef}
+                                            className="tcard-notes-textarea"
+                                            value={localNotes}
+                                            onChange={e => setLocalNotes(e.target.value)}
+                                            onBlur={saveNotes}
+                                            onKeyDown={e => { if (e.key === 'Escape') saveNotes(); }}
+                                            placeholder="Add notes..."
+                                            rows={3}
+                                        />
+                                    ) : (
+                                        <div className="tcard-detail-notes-body tcard-notes-clickable" onClick={startNotesEdit}>
+                                            {task.notes || <span className="tcard-notes-placeholder">Click to add notes...</span>}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -338,6 +375,7 @@
                 if (r.deadline) syncOneTask(r).then(refreshEmbed);
             };
             const removeTask = (id) => { setTasks(p => p.filter(t => t.id !== id)); removeOneFromGcal(id).then(refreshEmbed); };
+            const updateTaskNotes = (id, notes) => { setTasks(p => p.map(t => t.id === id ? { ...t, notes } : t)); };
             const removeCompletedTask = (id) => { setCompletedTasks(p => p.filter(t => t.id !== id)); };
             const startEditing = (task) => setEditingTask({ ...task });
             const saveEdit = () => {
@@ -480,7 +518,7 @@
                                         <div className="top-priority-row">
                                             {top4.map(task => (
                                                 <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
-                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} compact={false} />
+                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={false} />
                                             ))}
                                         </div>
                                     </div>
@@ -508,7 +546,7 @@
                                                         <div className="pcol-tasks">
                                                             {getProjectTasks(pid).map(task => (
                                                                 <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
-                                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} compact={true} />
+                                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={true} />
                                                             ))}
                                                         </div>
                                                     </div>
@@ -540,7 +578,7 @@
                                                     </div>
                                                     {filteredTasks.map(task => (
                                                         <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
-                                                            onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} compact={false} />
+                                                            onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={false} />
                                                     ))}
                                                 </div>
                                             </div>
