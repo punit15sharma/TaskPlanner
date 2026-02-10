@@ -81,6 +81,9 @@
             const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() =>
                 localStorage.getItem('gcalEmbedUrl') || ''
             );
+            const [gcalCalendarId, setGcalCalendarId] = React.useState(() =>
+                localStorage.getItem('gcalCalendarId') || 'primary'
+            );
             const [gcalSignedIn, setGcalSignedIn] = React.useState(false);
             const [gcalEventMap, setGcalEventMap] = React.useState(() =>
                 JSON.parse(localStorage.getItem('gcalEventMap') || '{}')
@@ -164,16 +167,16 @@
                     if (existingId) {
                         try {
                             resp = await gapi.client.calendar.events.update({
-                                calendarId: 'primary', eventId: existingId, resource: event
+                                calendarId: gcalCalendarId, eventId: existingId, resource: event
                             });
                         } catch (_) {
                             resp = await gapi.client.calendar.events.insert({
-                                calendarId: 'primary', resource: event
+                                calendarId: gcalCalendarId, resource: event
                             });
                         }
                     } else {
                         resp = await gapi.client.calendar.events.insert({
-                            calendarId: 'primary', resource: event
+                            calendarId: gcalCalendarId, resource: event
                         });
                     }
                     setGcalEventMap(prev => ({ ...prev, [task.id]: resp.result.id }));
@@ -189,7 +192,7 @@
                 const evId = gcalEventMap[taskId];
                 if (!evId) return;
                 try {
-                    await gapi.client.calendar.events.delete({ calendarId: 'primary', eventId: evId });
+                    await gapi.client.calendar.events.delete({ calendarId: gcalCalendarId, eventId: evId });
                 } catch (_) { /* may already be gone */ }
                 setGcalEventMap(prev => { const u = { ...prev }; delete u[taskId]; return u; });
             };
@@ -227,10 +230,12 @@
             // ─── Google Calendar Setup ──────────────────────────
             const [setupClientId, setSetupClientId] = React.useState('');
             const [setupEmbedUrl, setSetupEmbedUrl] = React.useState('');
+            const [setupCalendarId, setSetupCalendarId] = React.useState('');
 
             const openSetup = () => {
                 setSetupClientId(gcalClientId);
                 setSetupEmbedUrl(gcalEmbedUrl);
+                setSetupCalendarId(gcalCalendarId === 'primary' ? '' : gcalCalendarId);
                 setShowGcalSetup(true);
             };
 
@@ -252,6 +257,16 @@
                 } else {
                     setGcalEmbedUrl('');
                     localStorage.removeItem('gcalEmbedUrl');
+                }
+
+                // Calendar ID for syncing events
+                const calId = setupCalendarId.trim();
+                if (calId) {
+                    setGcalCalendarId(calId);
+                    localStorage.setItem('gcalCalendarId', calId);
+                } else {
+                    setGcalCalendarId('primary');
+                    localStorage.setItem('gcalCalendarId', 'primary');
                 }
 
                 setShowGcalSetup(false);
@@ -778,7 +793,30 @@
                                     </div>
 
                                     <div className="gcal-setup-section">
-                                        <h4 className="gcal-setup-heading">Step 2: Google API Client ID <span className="gcal-optional">(to sync tasks as events)</span></h4>
+                                        <h4 className="gcal-setup-heading">Step 2: Calendar ID <span className="gcal-optional">(which calendar to sync tasks to)</span></h4>
+                                        <div className="gcal-instructions">
+                                            <ol>
+                                                <li>In <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener noreferrer">Google Calendar Settings</a>, select the calendar you want tasks synced to</li>
+                                                <li>Scroll to <strong>"Integrate calendar"</strong></li>
+                                                <li>Copy the <strong>Calendar ID</strong>
+                                                    <br/><span style={{fontSize: '0.8rem', color: '#6b7280'}}>
+                                                        (looks like abc123@group.calendar.google.com or your email for the primary calendar)
+                                                    </span>
+                                                </li>
+                                            </ol>
+                                        </div>
+                                        <input
+                                            type="text"
+                                            value={setupCalendarId}
+                                            onChange={(e) => setSetupCalendarId(e.target.value)}
+                                            className="input"
+                                            placeholder="Leave blank to use your primary calendar"
+                                            style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                                        />
+                                    </div>
+
+                                    <div className="gcal-setup-section">
+                                        <h4 className="gcal-setup-heading">Step 3: Google API Client ID <span className="gcal-optional">(to sync tasks as events)</span></h4>
                                         <div className="gcal-instructions">
                                             <ol>
                                                 <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console &rarr; Credentials</a></li>
