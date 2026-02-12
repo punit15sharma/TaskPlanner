@@ -783,25 +783,6 @@ body {
 .gcal-instructions a { color: var(--primary); text-decoration: none; }
 .gcal-instructions a:hover { text-decoration: underline; }
 
-/* ─── Mattermost View ────────────────────────────── */
-.mm-view { padding: 1rem 1.25rem; }
-.mm-control-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.6rem 0.85rem;
-    background: var(--gray-50);
-    border: 1px solid var(--gray-200);
-    border-radius: var(--radius);
-    margin-bottom: 0.75rem;
-}
-.mm-bar-label { font-size: 0.88rem; font-weight: 600; color: var(--gray-700); }
-.mm-embed-wrapper {
-    border-radius: var(--radius);
-    overflow: hidden;
-    border: 1px solid var(--gray-200);
-}
-.mm-iframe { width: 100%; height: 700px; border: none; }
 
 /* ═══════════════════════════════════════════════════ */
 /*                  RESPONSIVE                        */
@@ -887,7 +868,4 @@ body {
     .tcard-notes-textarea { background: transparent; color: #ccc; }
     .tcard-notes-clickable:hover { background: rgba(255,255,255,0.05); }
     .tcard-notes-placeholder { color: #666; }
-    .mm-control-bar { background: #252525; border-color: #3a3a3a; }
-    .mm-bar-label { color: #ddd; }
-    .mm-embed-wrapper { border-color: #3a3a3a; }
 }
