@@ -251,6 +251,28 @@
                 document.addEventListener('mouseup', onUp);
             }, []);
 
+            // ─── Search State ────────────────────────────
+            const [searchQuery, setSearchQuery] = React.useState('');
+            const doSearch = (e) => {
+                e.preventDefault();
+                const q = searchQuery.trim();
+                if (q) window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank');
+            };
+
+            // ─── Mattermost State ───────────────────────
+            const [mmUrl, setMmUrl] = React.useState(() => localStorage.getItem('mattermostUrl') || '');
+            const [showMmSetup, setShowMmSetup] = React.useState(false);
+            const [setupMmUrl, setSetupMmUrl] = React.useState('');
+
+            React.useEffect(() => { localStorage.setItem('mattermostUrl', mmUrl); }, [mmUrl]);
+
+            const openMmSetup = () => { setSetupMmUrl(mmUrl); setShowMmSetup(true); };
+            const saveMmSetup = () => {
+                const url = setupMmUrl.trim();
+                setMmUrl(url);
+                setShowMmSetup(false);
+            };
+
             // ─── Google Calendar State ──────────────────
             const [gcalClientId, setGcalClientId] = React.useState(() => localStorage.getItem('gcalClientId') || '');
             const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() => localStorage.getItem('gcalEmbedUrl') || '');
@@ -446,10 +468,19 @@
                             <div className="header-left">
                                 <h1 className="header-title">Task Manager</h1>
                             </div>
-                            <div className="header-center workload-message">
-                                <div className="message-main">{analyzeWorkload(tasks).message}</div>
-                                <div className="message-advice">{analyzeWorkload(tasks).advice}</div>
-                                <div className="message-workload">{analyzeWorkload(tasks).workload}</div>
+                            <div className="header-center">
+                                <div className="workload-message">
+                                    <div className="message-main">{analyzeWorkload(tasks).message}</div>
+                                    <div className="message-advice">{analyzeWorkload(tasks).advice}</div>
+                                    <div className="message-workload">{analyzeWorkload(tasks).workload}</div>
+                                </div>
+                                <form className="google-search-bar" onSubmit={doSearch}>
+                                    <span className="search-icon">&#128269;</span>
+                                    <input type="text" className="search-input" value={searchQuery}
+                                        onChange={e => setSearchQuery(e.target.value)}
+                                        placeholder="Search Google..." />
+                                    <button type="submit" className="search-btn">Go</button>
+                                </form>
                             </div>
                             <div className="header-right">
                                 <button onClick={() => setShowThemePicker(!showThemePicker)} className="btn-secondary theme-toggle-btn" title="Change theme">
@@ -500,6 +531,7 @@
                         <div className="view-toggle">
                             <button className={'view-toggle-btn ' + (activeTab === 'tasks' ? 'active' : '')} onClick={() => setActiveTab('tasks')}>Tasks</button>
                             <button className={'view-toggle-btn ' + (activeTab === 'calendar' ? 'active' : '')} onClick={() => setActiveTab('calendar')}>Google Calendar</button>
+                            <button className={'view-toggle-btn ' + (activeTab === 'mattermost' ? 'active' : '')} onClick={() => setActiveTab('mattermost')}>Mattermost</button>
                         </div>
                         <div className="section-divider"></div>
 
@@ -652,6 +684,51 @@
                                     <div className="gcal-empty-state"><div className="gcal-empty-icon">&#128197;</div><h3>No Calendar URL</h3><p>Add your Google Calendar embed URL.</p><button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={openSetup}>Add URL</button></div>
                                 )}
                                 <div className="gcal-hint"><strong>How sync works:</strong> Tasks with deadlines become Google Calendar events automatically.</div>
+                            </div>
+                        )}
+
+                        {/* ═══ MATTERMOST VIEW ═════════════════ */}
+                        {activeTab === 'mattermost' && (
+                            <div className="mm-view">
+                                <div className="mm-control-bar">
+                                    <span className="mm-bar-label">Mattermost</span>
+                                    <button className="btn btn-primary" onClick={openMmSetup}>&#9881; Settings</button>
+                                </div>
+                                {mmUrl ? (
+                                    <div className="mm-embed-wrapper">
+                                        <iframe src={mmUrl} className="mm-iframe" frameBorder="0" title="Mattermost"></iframe>
+                                    </div>
+                                ) : (
+                                    <div className="gcal-empty-state">
+                                        <div className="gcal-empty-icon">&#128172;</div>
+                                        <h3>No Mattermost URL</h3>
+                                        <p>Add your Mattermost server URL to embed it here.</p>
+                                        <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={openMmSetup}>Add URL</button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ═══ MATTERMOST SETUP MODAL ═════════════ */}
+                        {showMmSetup && (
+                            <div className="edit-overlay" onClick={() => setShowMmSetup(false)}>
+                                <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+                                    <h3 className="modal-title">Mattermost Setup</h3>
+                                    <div style={{ marginBottom: '0.75rem' }}>
+                                        <label className="slider-label">Mattermost URL</label>
+                                        <p style={{ fontSize: '0.78rem', color: 'var(--gray-500)', margin: '0.25rem 0 0.5rem' }}>
+                                            Enter your Mattermost server URL (e.g. <code>https://your-team.mattermost.com</code>)
+                                        </p>
+                                        <input type="text" value={setupMmUrl} onChange={e => setSetupMmUrl(e.target.value)}
+                                            className="input" placeholder="https://mattermost.example.com"
+                                            style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+                                            onKeyDown={e => e.key === 'Enter' && saveMmSetup()} autoFocus />
+                                    </div>
+                                    <div className="modal-actions">
+                                        <button onClick={() => setShowMmSetup(false)} className="btn">Cancel</button>
+                                        <button onClick={saveMmSetup} className="btn btn-primary">Save</button>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
