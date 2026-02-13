@@ -164,6 +164,12 @@ const formatICSDate = (dateStr) => {
    return dateStr.replace(/-/g, '');
 };
 
+const formatICSDateTime = (dateStr) => {
+   // Convert "YYYY-MM-DDTHH:MM" to "YYYYMMDDTHHMMSS"
+   const d = new Date(dateStr);
+   return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+};
+
 const generateICS = (tasks) => {
    const tasksWithDeadlines = tasks.filter(t => t.deadline);
    if (tasksWithDeadlines.length === 0) {
@@ -183,18 +189,28 @@ const generateICS = (tasks) => {
    tasksWithDeadlines.forEach(task => {
        const projectName = (PROJECTS[task.project] && PROJECTS[task.project].name) || 'Other';
        const uid = `task-${task.id}@taskmanager`;
-       const dtstart = formatICSDate(task.deadline);
-       // All-day event: DTEND is the next day
-       const endDate = new Date(task.deadline);
-       endDate.setDate(endDate.getDate() + 1);
-       const dtend = endDate.toISOString().split('T')[0].replace(/-/g, '');
+       const hasTime = task.deadline.includes('T');
        const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
        ics.push('BEGIN:VEVENT');
        ics.push(`UID:${uid}`);
        ics.push(`DTSTAMP:${now}`);
-       ics.push(`DTSTART;VALUE=DATE:${dtstart}`);
-       ics.push(`DTEND;VALUE=DATE:${dtend}`);
+
+       if (hasTime) {
+           const dtstart = formatICSDateTime(task.deadline);
+           const endDate = new Date(new Date(task.deadline).getTime() + 3600000); // +1 hour
+           const dtend = endDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+           ics.push(`DTSTART:${dtstart}`);
+           ics.push(`DTEND:${dtend}`);
+       } else {
+           const dtstart = formatICSDate(task.deadline);
+           const endDate = new Date(task.deadline);
+           endDate.setDate(endDate.getDate() + 1);
+           const dtend = endDate.toISOString().split('T')[0].replace(/-/g, '');
+           ics.push(`DTSTART;VALUE=DATE:${dtstart}`);
+           ics.push(`DTEND;VALUE=DATE:${dtend}`);
+       }
+
        ics.push(`SUMMARY:[${projectName}] ${task.name}`);
        ics.push(`DESCRIPTION:Importance: ${task.importance}/5\\nLength: ${task.length}/5\\nDifficulty: ${task.difficulty}/5\\nPriority Score: ${calculatePriority(task)}`);
        ics.push(`CATEGORIES:${projectName}`);

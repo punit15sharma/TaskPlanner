@@ -79,7 +79,7 @@
                         </div>
                         <div className="tcard-meta">
                             <span className="tcard-project" style={{ backgroundColor: color }}>{proj.name}</span>
-                            {task.deadline && <span className="tcard-deadline">Due {new Date(task.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
+                            {task.deadline && <span className="tcard-deadline">Due {task.deadline.includes('T') ? new Date(task.deadline).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : new Date(task.deadline + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
                             {gcalEventMap[task.id] && <span className="tcard-synced">synced</span>}
                         </div>
 
@@ -117,7 +117,7 @@
                                 </div>
                                 <div className="tcard-detail-dates">
                                     <span>Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)</span>
-                                    {task.deadline && <span>Deadline: {new Date(task.deadline).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                                    {task.deadline && <span>Deadline: {task.deadline.includes('T') ? new Date(task.deadline).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : new Date(task.deadline + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
                                 </div>
                                 <div className="tcard-detail-notes" onClick={e => e.stopPropagation()}>
                                     <div className="tcard-detail-notes-label">Notes</div>
@@ -306,7 +306,11 @@
             const syncOneTask = async (task) => {
                 if (!isGcalReady() || !task.deadline) return null;
                 const pn = (projects[task.project] || projects.other).name;
-                const ev = { summary: '[' + pn + '] ' + task.name, description: 'Imp:' + task.importance + ' Len:' + task.length + ' Diff:' + task.difficulty + (task.notes ? '\n' + task.notes : ''), start: { date: task.deadline }, end: { date: task.deadline } };
+                const hasTime = task.deadline.includes('T');
+                const startEnd = hasTime
+                    ? { start: { dateTime: new Date(task.deadline).toISOString() }, end: { dateTime: new Date(new Date(task.deadline).getTime() + 3600000).toISOString() } }
+                    : { start: { date: task.deadline }, end: { date: task.deadline } };
+                const ev = { summary: '[' + pn + '] ' + task.name, description: 'Imp:' + task.importance + ' Len:' + task.length + ' Diff:' + task.difficulty + (task.notes ? '\n' + task.notes : ''), ...startEnd };
                 try {
                     let r; const eid = gcalEventMap[task.id];
                     if (eid) { try { r = await gapi.client.calendar.events.update({ calendarId: gcalCalendarId, eventId: eid, resource: ev }); } catch(_) { r = await gapi.client.calendar.events.insert({ calendarId: gcalCalendarId, resource: ev }); } }
@@ -693,7 +697,7 @@
                                     <div className="modal-row-2">
                                         <div className="slider-container">
                                             <label className="slider-label">Deadline</label>
-                                            <input type="date" value={editingTask.deadline || ''} onChange={e => setEditingTask({ ...editingTask, deadline: e.target.value || null })} className="input" />
+                                            <input type="datetime-local" value={editingTask.deadline || ''} onChange={e => setEditingTask({ ...editingTask, deadline: e.target.value || null })} className="input" />
                                         </div>
                                         <div className="slider-container">
                                             <label className="slider-label">Project</label>
