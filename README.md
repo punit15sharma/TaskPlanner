@@ -1,0 +1,1 @@
+Just download these to your computer and open index.html to start using. The browser will handle the memory (as long as you don't clear cache). For backups, export to `.json` and import whenever you need.

@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Planner</title>
+    <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Raleway:wght@400;600;700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+    <script src="imports/react.js"></script>
+    <script src="imports/react-dom.js"></script>
+    <script src="imports/babel.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <script async defer src="https://apis.google.com/js/api.js" onload="onGapiLoad()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="onGisLoad()"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script src="utils.js"></script>
+    <script>
+        var __gapiReady = false, __gisReady = false;
+        var __gapiCbs = [], __gisCbs = [];
+        function onGapiLoad() {
+            gapi.load('client', function() {
+                gapi.client.init({}).then(function() {
+                    return gapi.client.load('https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest');
+                }).then(function() {
+                    __gapiReady = true;
+                    __gapiCbs.forEach(function(cb) { cb(); });
+                    __gapiCbs = [];
+                });
+            });
+        }
+        function onGisLoad() {
+            __gisReady = true;
+            __gisCbs.forEach(function(cb) { cb(); });
+            __gisCbs = [];
+        }
+    </script>
+
+    <script type="text/babel">
+        /* ───────────────── Compact Task Card ──────────────── */
+        function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, onUpdateNotes, compact }) {
+            const [expanded, setExpanded] = React.useState(false);
+            const [editingNotes, setEditingNotes] = React.useState(false);
+            const [localNotes, setLocalNotes] = React.useState(task.notes || '');
+            const notesRef = React.useRef(null);
+            const proj = projects[task.project || 'other'] || projects.other;
+            const color = proj.color;
+
+            // Keep local notes in sync if task changes externally
+            React.useEffect(() => { setLocalNotes(task.notes || ''); }, [task.notes]);
+
+            const toggle = (e) => {
+                if (e.target.closest('.tcard-actions')) return;
+                if (e.target.closest('.tcard-detail-notes')) return;
+                setExpanded(prev => !prev);
+            };
+
+            const startNotesEdit = (e) => {
+                e.stopPropagation();
+                setEditingNotes(true);
+                setTimeout(() => { if (notesRef.current) notesRef.current.focus(); }, 50);
+            };
+
+            const saveNotes = () => {
+                setEditingNotes(false);
+                if (localNotes !== (task.notes || '') && onUpdateNotes) {
+                    onUpdateNotes(task.id, localNotes);
+                }
+            };
+
+            return (
+                <div id={'task-' + task.id}
+                    className={'tcard slide-in' + (compact ? ' tcard-compact' : '') + (expanded ? ' tcard-expanded' : '')}
+                    style={{ borderLeftColor: color, '--proj-color': color }}
+                    onClick={toggle}>
+                    <div className="tcard-body">
+                        <div className="tcard-header">
+                            <span className="tcard-name">{task.name}</span>
+                            <span className="tcard-score">{calculatePriority(task)}</span>
+                        </div>
+                        <div className="tcard-meta">
+                            <span className="tcard-project" style={{ backgroundColor: color }}>{proj.name}</span>
+                            {task.deadline && <span className="tcard-deadline">Due {task.deadline.includes('T') ? new Date(task.deadline).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : new Date(task.deadline + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>}
+                            {gcalEventMap[task.id] && <span className="tcard-synced">synced</span>}
+                        </div>
+
+                        {/* Collapsed: truncated notes */}
+                        {!expanded && task.notes && (
+                            <div className="tcard-notes">{task.notes.length > 60 ? task.notes.slice(0, 60) + '...' : task.notes}</div>
+                        )}
+
+                        {/* Collapsed: compact stats */}
+                        {!expanded && (
+                            <div className="tcard-stats">
+                                <span>Imp {task.importance}</span>
+                                <span>Len {task.length}</span>
+                                <span>Diff {task.difficulty}</span>
+                                <span>{getDaysOld(task.createdAt)}d old</span>
+                            </div>
+                        )}
+
+                        {/* Expanded: full details */}
+                        {expanded && (
+                            <div className="tcard-detail">
+                                <div className="tcard-detail-grid">
+                                    <div className="tcard-detail-item">
+                                        <span className="tcard-detail-label">Importance</span>
+                                        <span className="tcard-detail-value">{task.importance}/5</span>
+                                    </div>
+                                    <div className="tcard-detail-item">
+                                        <span className="tcard-detail-label">Length</span>
+                                        <span className="tcard-detail-value">{task.length}/5</span>
+                                    </div>
+                                    <div className="tcard-detail-item">
+                                        <span className="tcard-detail-label">Difficulty</span>
+                                        <span className="tcard-detail-value">{task.difficulty}/5</span>
+                                    </div>
+                                </div>
+                                <div className="tcard-detail-dates">
+                                    <span>Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)</span>
+                                    {task.deadline && <span>Deadline: {task.deadline.includes('T') ? new Date(task.deadline).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : new Date(task.deadline + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                                </div>
+                                <div className="tcard-detail-notes" onClick={e => e.stopPropagation()}>
+                                    <div className="tcard-detail-notes-label">Notes</div>
+                                    {editingNotes ? (
+                                        <textarea
+                                            ref={notesRef}
+                                            className="tcard-notes-textarea"
+                                            value={localNotes}
+                                            onChange={e => setLocalNotes(e.target.value)}
+                                            onBlur={saveNotes}
+                                            onKeyDown={e => { if (e.key === 'Escape') saveNotes(); }}
+                                            placeholder="Add notes..."
+                                            rows={3}
+                                        />
+                                    ) : (
+                                        <div className="tcard-detail-notes-body tcard-notes-clickable" onClick={startNotesEdit}>
+                                            {task.notes || <span className="tcard-notes-placeholder">Click to add notes...</span>}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <div className="tcard-actions" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => onComplete(task)} className="tcard-btn tcard-btn-done" title="Complete">&#10004;</button>
+                        <button onClick={() => onEdit(task)} className="tcard-btn tcard-btn-edit" title="Edit">&#9998;</button>
+                        <button onClick={() => onDelete(task.id)} className="tcard-btn tcard-btn-del" title="Delete">&#10006;</button>
+                    </div>
+                </div>
+            );
+        }
+
+        /* ───────────────── Theme Definitions ───────────────── */
+        const THEMES = {
+            ocean:    { name: 'Ocean',    gradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',     primary: '#2563eb', primaryLight: '#3b82f6', primaryDark: '#1d4ed8' },
+            sunset:   { name: 'Sunset',   gradient: 'linear-gradient(135deg, #f97316, #dc2626)',     primary: '#ea580c', primaryLight: '#f97316', primaryDark: '#c2410c' },
+            forest:   { name: 'Forest',   gradient: 'linear-gradient(135deg, #22c55e, #15803d)',     primary: '#16a34a', primaryLight: '#22c55e', primaryDark: '#15803d' },
+            lavender: { name: 'Lavender', gradient: 'linear-gradient(135deg, #a78bfa, #7c3aed)',     primary: '#8b5cf6', primaryLight: '#a78bfa', primaryDark: '#7c3aed' },
+            midnight: { name: 'Midnight', gradient: 'linear-gradient(135deg, #6366f1, #312e81)',     primary: '#4f46e5', primaryLight: '#6366f1', primaryDark: '#3730a3' },
+            rose:     { name: 'Rose',     gradient: 'linear-gradient(135deg, #fb7185, #be123c)',     primary: '#e11d48', primaryLight: '#fb7185', primaryDark: '#be123c' },
+            teal:     { name: 'Teal',     gradient: 'linear-gradient(135deg, #2dd4bf, #0d9488)',     primary: '#14b8a6', primaryLight: '#2dd4bf', primaryDark: '#0d9488' },
+            slate:    { name: 'Slate',    gradient: 'linear-gradient(135deg, #64748b, #334155)',     primary: '#475569', primaryLight: '#64748b', primaryDark: '#334155' },
+            amber:    { name: 'Amber',    gradient: 'linear-gradient(135deg, #fbbf24, #d97706)',     primary: '#d97706', primaryLight: '#fbbf24', primaryDark: '#b45309' },
+            cyber:    { name: 'Cyber',    gradient: 'linear-gradient(135deg, #06b6d4, #6366f1)',     primary: '#0891b2', primaryLight: '#06b6d4', primaryDark: '#6366f1' },
+        };
+
+        /* ───────────────── Main App ───────────────────────── */
+        function TaskMatrix() {
+            // ─── Core State ─────────────────────────────
+            const [tasks, setTasks] = React.useState(() => {
+                const s = localStorage.getItem('tasks');
+                return s ? JSON.parse(s) : [];
+            });
+            const [completedTasks, setCompletedTasks] = React.useState(() => {
+                const s = localStorage.getItem('completedTasks');
+                return s ? JSON.parse(s) : [];
+            });
+            const [showCompleted, setShowCompleted] = React.useState(false);
+            const [currentFilter, setCurrentFilter] = React.useState('all');
+            const [activeTab, setActiveTab] = React.useState('tasks');
+            const [projectNotes, setProjectNotes] = React.useState(() => {
+                const s = localStorage.getItem('projectNotes');
+                return s ? JSON.parse(s) : { general: '' };
+            });
+            const [projects, setProjects] = React.useState(() => loadProjects());
+            const [showAddProject, setShowAddProject] = React.useState(false);
+            const [newProjectName, setNewProjectName] = React.useState('');
+            const [newProjectColor, setNewProjectColor] = React.useState(PROJECT_COLORS[0]);
+            const [editingTask, setEditingTask] = React.useState(null);
+
+            // ─── Theme State ────────────────────────────
+            const [theme, setTheme] = React.useState(() => localStorage.getItem('appTheme') || 'ocean');
+            const [showThemePicker, setShowThemePicker] = React.useState(false);
+
+            const currentTheme = THEMES[theme] || THEMES.ocean;
+
+            // Apply theme CSS variables to document
+            React.useEffect(() => {
+                const root = document.documentElement;
+                root.style.setProperty('--primary', currentTheme.primary);
+                root.style.setProperty('--primary-light', currentTheme.primaryLight);
+                root.style.setProperty('--primary-dark', currentTheme.primaryDark);
+                localStorage.setItem('appTheme', theme);
+            }, [theme]);
+
+            // ─── Project Order State ────────────────────
+            const [projectOrder, setProjectOrder] = React.useState(() => {
+                const saved = localStorage.getItem('projectOrder');
+                return saved ? JSON.parse(saved) : null;
+            });
+
+            React.useEffect(() => {
+                if (projectOrder) localStorage.setItem('projectOrder', JSON.stringify(projectOrder));
+            }, [projectOrder]);
+
+            // Drag state for column reordering
+            const [draggedCol, setDraggedCol] = React.useState(null);
+            const [dragOverCol, setDragOverCol] = React.useState(null);
+
+            // ─── Resize State ───────────────────────────
+            const [notesPanelWidth, setNotesPanelWidth] = React.useState(() => {
+                return parseInt(localStorage.getItem('notesPanelWidth')) || 260;
+            });
+            const resizingRef = React.useRef(false);
+            const containerRef = React.useRef(null);
+
+            React.useEffect(() => {
+                localStorage.setItem('notesPanelWidth', notesPanelWidth);
+            }, [notesPanelWidth]);
+
+            // Resize handler
+            const startResize = React.useCallback((e) => {
+                e.preventDefault();
+                resizingRef.current = true;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                const onMove = (ev) => {
+                    if (!resizingRef.current || !containerRef.current) return;
+                    const rect = containerRef.current.getBoundingClientRect();
+                    const newWidth = Math.max(140, Math.min(500, rect.right - ev.clientX));
+                    setNotesPanelWidth(newWidth);
+                };
+                const onUp = () => {
+                    resizingRef.current = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            }, []);
+
+            // ─── Search State ────────────────────────────
+            const [searchQuery, setSearchQuery] = React.useState('');
+            const doSearch = (e) => {
+                e.preventDefault();
+                const q = searchQuery.trim();
+                if (q) window.open('https://www.google.com/search?q=' + encodeURIComponent(q), '_blank');
+            };
+
+            // ─── Gist Sync State ─────────────────────────
+            const OAUTH_CLIENT_ID = 'Ov23liDAgTRi0BTj5Sik';
+            const OAUTH_WORKER_URL = 'https://taskmanager-oauth.punit15sharma.workers.dev';
+            const OAUTH_REDIRECT = window.location.origin + window.location.pathname;
+
+            const [gistToken, setGistToken] = React.useState(() => localStorage.getItem('gistSyncToken') || '');
+            const [gistId, setGistId] = React.useState(() => localStorage.getItem('gistSyncId') || '');
+            const [syncStatus, setSyncStatus] = React.useState('idle');
+            const [lastSyncTime, setLastSyncTime] = React.useState(() => localStorage.getItem('lastSyncTime') || '');
+            const [showSyncSetup, setShowSyncSetup] = React.useState(false);
+            const [setupToken, setSetupToken] = React.useState('');
+            const [setupGistId, setSetupGistId] = React.useState('');
+            const [ghUser, setGhUser] = React.useState(() => localStorage.getItem('ghUser') || '');
+
+            React.useEffect(() => { if (gistToken) localStorage.setItem('gistSyncToken', gistToken); else localStorage.removeItem('gistSyncToken'); }, [gistToken]);
+            React.useEffect(() => { if (gistId) localStorage.setItem('gistSyncId', gistId); else localStorage.removeItem('gistSyncId'); }, [gistId]);
+            React.useEffect(() => { if (lastSyncTime) localStorage.setItem('lastSyncTime', lastSyncTime); }, [lastSyncTime]);
+            React.useEffect(() => { if (ghUser) localStorage.setItem('ghUser', ghUser); else localStorage.removeItem('ghUser'); }, [ghUser]);
+
+            // Handle OAuth callback on page load
+            React.useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const code = params.get('code');
+                if (!code) return;
+                // Clean the URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                setSyncStatus('Signing in...');
+                fetch(OAUTH_WORKER_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.access_token) {
+                        setGistToken(data.access_token);
+                        setSyncStatus('Signed in');
+                        // Fetch GitHub username
+                        return fetch('https://api.github.com/user', { headers: { 'Authorization': 'token ' + data.access_token } })
+                            .then(r => r.json())
+                            .then(u => { if (u.login) setGhUser(u.login); })
+                            .then(() => {
+                                // Auto-discover existing sync gist
+                                return fetch('https://api.github.com/gists', { headers: { 'Authorization': 'token ' + data.access_token } })
+                                    .then(r => r.json())
+                                    .then(gists => {
+                                        const found = gists.find(g => g.files && g.files['taskmanager-data.json']);
+                                        if (found) setGistId(found.id);
+                                    });
+                            });
+                    } else {
+                        setSyncStatus('Sign-in failed: ' + (data.error_description || data.error || 'Unknown error'));
+                    }
+                })
+                .catch(e => setSyncStatus('Sign-in failed: ' + e.message))
+                .finally(() => setTimeout(() => setSyncStatus(s => s.startsWith('Sign') ? 'idle' : s), 4000));
+            }, []);
+
+            const signInWithGitHub = () => {
+                const url = 'https://github.com/login/oauth/authorize?client_id=' + OAUTH_CLIENT_ID + '&redirect_uri=' + encodeURIComponent(OAUTH_REDIRECT) + '&scope=gist';
+                window.location.href = url;
+            };
+
+            const signOutGist = () => {
+                setGistToken('');
+                setGistId('');
+                setGhUser('');
+                setLastSyncTime('');
+                setSyncStatus('idle');
+            };
+
+            // ─── Notes Pages State ──────────────────────
+            const [notesPages, setNotesPages] = React.useState(() => {
+                const s = localStorage.getItem('notesPages');
+                return s ? JSON.parse(s) : [];
+            });
+            const [activeNoteId, setActiveNoteId] = React.useState(null);
+            const [notesSearch, setNotesSearch] = React.useState('');
+            const [renamingNoteId, setRenamingNoteId] = React.useState(null);
+            const [renameValue, setRenameValue] = React.useState('');
+            const [showNewNote, setShowNewNote] = React.useState(false);
+            const [newNoteTitle, setNewNoteTitle] = React.useState('');
+            const [newNoteProject, setNewNoteProject] = React.useState('general');
+
+            React.useEffect(() => {
+                localStorage.setItem('notesPages', JSON.stringify(notesPages));
+            }, [notesPages]);
+
+            const activeNote = notesPages.find(n => n.id === activeNoteId) || null;
+
+            const openNewNote = () => { setNewNoteTitle(''); setNewNoteProject('general'); setShowNewNote(true); };
+            const createNote = () => {
+                const title = newNoteTitle.trim() || 'Untitled';
+                const note = { id: Date.now(), title, project: newNoteProject, content: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+                setNotesPages(p => [note, ...p]);
+                setActiveNoteId(note.id);
+                setShowNewNote(false);
+            };
+            const updateNote = (id, field, value) => {
+                setNotesPages(p => p.map(n => n.id === id ? { ...n, [field]: value, updatedAt: new Date().toISOString() } : n));
+            };
+            const deleteNote = (id) => {
+                if (!confirm('Delete this note?')) return;
+                setNotesPages(p => p.filter(n => n.id !== id));
+                if (activeNoteId === id) setActiveNoteId(null);
+            };
+            const startRename = (note, e) => {
+                e.stopPropagation();
+                setRenamingNoteId(note.id);
+                setRenameValue(note.title);
+            };
+            const finishRename = () => {
+                if (renamingNoteId && renameValue.trim()) {
+                    updateNote(renamingNoteId, 'title', renameValue.trim());
+                }
+                setRenamingNoteId(null);
+            };
+
+            const filteredNotes = notesSearch
+                ? notesPages.filter(n => n.title.toLowerCase().includes(notesSearch.toLowerCase()) || (n.content || '').replace(/<[^>]*>/g, '').toLowerCase().includes(notesSearch.toLowerCase()))
+                : notesPages;
+
+            // ─── Rich Text Editor ──────────────────────────
+            const editorRef = React.useRef(null);
+            const saveTimerRef = React.useRef(null);
+            const NOTE_FONTS = [
+                { label: 'System', value: 'inherit' },
+                { label: 'Montserrat', value: 'Montserrat, sans-serif' },
+                { label: 'Raleway', value: 'Raleway, sans-serif' },
+                { label: 'Lato', value: 'Lato, sans-serif' },
+                { label: 'Serif', value: 'Georgia, serif' },
+                { label: 'Mono', value: 'SFMono-Regular, Consolas, monospace' },
+            ];
+            const NOTE_SIZES = [
+                { label: 'Small', value: '2' },
+                { label: 'Normal', value: '3' },
+                { label: 'Large', value: '5' },
+                { label: 'XL', value: '6' },
+            ];
+            const NOTE_COLORS = ['#000000','#F2385A','#343844','#36B1BF','#4AD9D9','#E9F1DF','#FDC536','#e03131','#2b8a3e','#1971c2','#7048e8','#868e96'];
+
+            const execFmt = (cmd, val) => {
+                document.execCommand(cmd, false, val || null);
+                if (editorRef.current) editorRef.current.focus();
+            };
+
+            const onEditorInput = () => {
+                if (!editorRef.current || !activeNote) return;
+                const html = editorRef.current.innerHTML;
+                clearTimeout(saveTimerRef.current);
+                saveTimerRef.current = setTimeout(() => updateNote(activeNote.id, 'content', html), 300);
+            };
+
+            // Sync editor content when switching notes
+            React.useEffect(() => {
+                if (editorRef.current && activeNote) {
+                    if (editorRef.current.innerHTML !== activeNote.content) {
+                        editorRef.current.innerHTML = activeNote.content || '';
+                    }
+                }
+            }, [activeNoteId]);
+
+            const stripHtml = (html) => {
+                if (!html) return '';
+                return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+            };
+
+            const formatNoteDate = (iso) => {
+                const d = new Date(iso);
+                const now = new Date();
+                const diff = now - d;
+                if (diff < 60000) return 'Just now';
+                if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+                if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+                if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            };
+
+            // ─── Google Calendar State ──────────────────
+            const [gcalClientId, setGcalClientId] = React.useState(() => localStorage.getItem('gcalClientId') || '');
+            const [gcalEmbedUrl, setGcalEmbedUrl] = React.useState(() => localStorage.getItem('gcalEmbedUrl') || '');
+            const [gcalCalendarId, setGcalCalendarId] = React.useState(() => localStorage.getItem('gcalCalendarId') || 'primary');
+            const [gcalSignedIn, setGcalSignedIn] = React.useState(false);
+            const [gcalEventMap, setGcalEventMap] = React.useState(() => JSON.parse(localStorage.getItem('gcalEventMap') || '{}'));
+            const [gcalSyncing, setGcalSyncing] = React.useState(false);
+            const [gcalStatus, setGcalStatus] = React.useState('');
+            const [apisLoaded, setApisLoaded] = React.useState(false);
+            const [showGcalSetup, setShowGcalSetup] = React.useState(false);
+            const [gcalRefreshKey, setGcalRefreshKey] = React.useState(0);
+            const tokenClientRef = React.useRef(null);
+            const [setupClientId, setSetupClientId] = React.useState('');
+            const [setupEmbedUrl, setSetupEmbedUrl] = React.useState('');
+            const [setupCalendarId, setSetupCalendarId] = React.useState('');
+
+            // ─── Google API Init ────────────────────────
+            React.useEffect(() => {
+                const check = () => { if (__gapiReady && __gisReady) setApisLoaded(true); };
+                if (__gapiReady && __gisReady) setApisLoaded(true);
+                else { if (!__gapiReady) __gapiCbs.push(check); if (!__gisReady) __gisCbs.push(check); }
+            }, []);
+            React.useEffect(() => {
+                if (apisLoaded && gcalClientId) {
+                    tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+                        client_id: gcalClientId,
+                        scope: 'https://www.googleapis.com/auth/calendar.events',
+                        callback: (r) => { if (r.error) { setGcalStatus('Auth failed'); return; } setGcalSignedIn(true); setGcalStatus('Signed in'); },
+                    });
+                }
+            }, [apisLoaded, gcalClientId]);
+
+            // ─── Persistence ────────────────────────────
+            React.useEffect(() => { PROJECTS = projects; saveProjects(projects); }, [projects]);
+            React.useEffect(() => {
+                localStorage.setItem('tasks', JSON.stringify(tasks));
+                localStorage.setItem('completedTasks', JSON.stringify(completedTasks));
+                localStorage.setItem('projectNotes', JSON.stringify(projectNotes));
+            }, [tasks, completedTasks, projectNotes]);
+            React.useEffect(() => { localStorage.setItem('gcalEventMap', JSON.stringify(gcalEventMap)); }, [gcalEventMap]);
+
+            // ─── Google Calendar Helpers ─────────────────
+            const isGcalReady = () => gcalSignedIn && gapi && gapi.client && gapi.client.getToken();
+            const refreshEmbed = () => setGcalRefreshKey(k => k + 1);
+            const syncOneTask = async (task) => {
+                if (!isGcalReady() || !task.deadline) return null;
+                const pn = (projects[task.project] || projects.other).name;
+                const hasTime = task.deadline.includes('T');
+                const startEnd = hasTime
+                    ? { start: { dateTime: new Date(task.deadline).toISOString() }, end: { dateTime: new Date(new Date(task.deadline).getTime() + 3600000).toISOString() } }
+                    : { start: { date: task.deadline }, end: { date: task.deadline } };
+                const ev = { summary: '[' + pn + '] ' + task.name, description: 'Imp:' + task.importance + ' Len:' + task.length + ' Diff:' + task.difficulty + (task.notes ? '\n' + task.notes : ''), ...startEnd };
+                try {
+                    let r; const eid = gcalEventMap[task.id];
+                    if (eid) { try { r = await gapi.client.calendar.events.update({ calendarId: gcalCalendarId, eventId: eid, resource: ev }); } catch(_) { r = await gapi.client.calendar.events.insert({ calendarId: gcalCalendarId, resource: ev }); } }
+                    else { r = await gapi.client.calendar.events.insert({ calendarId: gcalCalendarId, resource: ev }); }
+                    setGcalEventMap(p => ({ ...p, [task.id]: r.result.id })); return r.result.id;
+                } catch(e) { return null; }
+            };
+            const removeOneFromGcal = async (taskId) => {
+                if (!isGcalReady()) return; const eid = gcalEventMap[taskId]; if (!eid) return;
+                try { await gapi.client.calendar.events.delete({ calendarId: gcalCalendarId, eventId: eid }); } catch(_){}
+                setGcalEventMap(p => { const u = { ...p }; delete u[taskId]; return u; });
+            };
+            const syncAllTasks = async () => {
+                if (!isGcalReady()) return; setGcalSyncing(true); setGcalStatus('Syncing...');
+                const wd = tasks.filter(t => t.deadline); let ok = 0;
+                for (const t of wd) { if (await syncOneTask(t)) ok++; }
+                setGcalSyncing(false); setGcalStatus('Synced ' + ok + '/' + wd.length); refreshEmbed();
+            };
+            const signIn = () => { if (tokenClientRef.current) tokenClientRef.current.requestAccessToken({ prompt: 'consent' }); };
+            const signOut = () => { const t = gapi.client.getToken(); if (t) { google.accounts.oauth2.revoke(t.access_token); gapi.client.setToken(null); } setGcalSignedIn(false); setGcalStatus('Signed out'); };
+            const openSetup = () => { setSetupClientId(gcalClientId); setSetupEmbedUrl(gcalEmbedUrl); setSetupCalendarId(gcalCalendarId === 'primary' ? '' : gcalCalendarId); setShowGcalSetup(true); };
+            const saveSetup = () => {
+                const cid = setupClientId.trim(); const embed = setupEmbedUrl.trim();
+                if (cid) { setGcalClientId(cid); localStorage.setItem('gcalClientId', cid); }
+                if (embed) { const m = embed.match(/src="([^"]+)"/); const u = m ? m[1] : embed; setGcalEmbedUrl(u); localStorage.setItem('gcalEmbedUrl', u); } else { setGcalEmbedUrl(''); localStorage.removeItem('gcalEmbedUrl'); }
+                const calId = setupCalendarId.trim(); if (calId) { setGcalCalendarId(calId); localStorage.setItem('gcalCalendarId', calId); } else { setGcalCalendarId('primary'); localStorage.setItem('gcalCalendarId', 'primary'); }
+                setShowGcalSetup(false);
+            };
+
+            // ─── Project Management ─────────────────────
+            const addProject = () => {
+                const trimmed = newProjectName.trim(); if (!trimmed) return;
+                const id = trimmed.toLowerCase().replace(/\s+/g, '-');
+                if (projects[id]) { alert('Already exists.'); return; }
+                setProjects(p => ({ ...p, [id]: { name: trimmed, color: newProjectColor } }));
+                // Append new project to order (before 'other' if possible)
+                setProjectOrder(prev => {
+                    const order = prev ? [...prev] : [...rawProjectIds];
+                    const otherIdx = order.indexOf('other');
+                    if (otherIdx >= 0) order.splice(otherIdx, 0, id);
+                    else order.push(id);
+                    return order;
+                });
+                setNewProjectName(''); setNewProjectColor(PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)]); setShowAddProject(false);
+            };
+            const deleteProject = (pid) => {
+                if (pid === 'other') return;
+                if (!confirm('Delete "' + projects[pid].name + '"? Tasks move to Other.')) return;
+                setTasks(p => p.map(t => t.project === pid ? { ...t, project: 'other' } : t));
+                setCompletedTasks(p => p.map(t => t.project === pid ? { ...t, project: 'other' } : t));
+                setProjects(p => { const u = { ...p }; delete u[pid]; return u; });
+                setProjectOrder(prev => prev ? prev.filter(id => id !== pid) : null);
+                if (currentFilter === pid) setCurrentFilter('all');
+            };
+
+            // ─── Task CRUD ──────────────────────────────
+            const completeTask = (task) => {
+                const el = document.getElementById('task-' + task.id); if (el) el.classList.add('celebrate');
+                setTimeout(() => {
+                    setTasks(p => p.filter(t => t.id !== task.id));
+                    setCompletedTasks(p => [{ ...task, completedAt: new Date().toISOString() }, ...p.slice(0, 49)]);
+                    removeOneFromGcal(task.id).then(refreshEmbed);
+                }, 400);
+            };
+            const revertTask = (task) => {
+                setCompletedTasks(p => p.filter(t => t.id !== task.id));
+                const r = { ...task, createdAt: new Date().toISOString() };
+                setTasks(p => [...p, r]);
+                if (r.deadline) syncOneTask(r).then(refreshEmbed);
+            };
+            const removeTask = (id) => { setTasks(p => p.filter(t => t.id !== id)); removeOneFromGcal(id).then(refreshEmbed); };
+            const updateTaskNotes = (id, notes) => { setTasks(p => p.map(t => t.id === id ? { ...t, notes } : t)); };
+            const removeCompletedTask = (id) => { setCompletedTasks(p => p.filter(t => t.id !== id)); };
+            const startEditing = (task) => setEditingTask({ ...task });
+            const saveEdit = () => {
+                let saved;
+                if (editingTask.id === 'new') { saved = { ...editingTask, id: Date.now(), createdAt: new Date().toISOString() }; setTasks(p => [...p, saved]); }
+                else { saved = editingTask; setTasks(p => p.map(t => t.id === editingTask.id ? editingTask : t)); }
+                setEditingTask(null);
+                if (saved.deadline) syncOneTask(saved).then(refreshEmbed); else removeOneFromGcal(saved.id).then(refreshEmbed);
+            };
+
+            // ─── Derived Data ───────────────────────────
+            const sortedAll = [...tasks].sort((a, b) => calculatePriority(b) - calculatePriority(a));
+            const top4 = sortedAll.slice(0, 4);
+            const rawProjectIds = Object.keys(projects);
+
+            // Use saved order, but sync with actual projects (remove deleted, append new)
+            const projectIds = React.useMemo(() => {
+                if (!projectOrder) return rawProjectIds;
+                const ordered = projectOrder.filter(id => rawProjectIds.includes(id));
+                const missing = rawProjectIds.filter(id => !ordered.includes(id));
+                return [...ordered, ...missing];
+            }, [projectOrder, rawProjectIds.join(',')]);
+
+            // Column reorder helpers
+            const onColDragStart = (pid) => setDraggedCol(pid);
+            const onColDragOver = (e, pid) => { e.preventDefault(); if (pid !== draggedCol) setDragOverCol(pid); };
+            const onColDrop = (pid) => {
+                if (!draggedCol || draggedCol === pid) { setDraggedCol(null); setDragOverCol(null); return; }
+                const order = [...projectIds];
+                const fromIdx = order.indexOf(draggedCol);
+                const toIdx = order.indexOf(pid);
+                order.splice(fromIdx, 1);
+                order.splice(toIdx, 0, draggedCol);
+                setProjectOrder(order);
+                setDraggedCol(null);
+                setDragOverCol(null);
+            };
+            const onColDragEnd = () => { setDraggedCol(null); setDragOverCol(null); };
+
+            const getProjectTasks = (pid) => {
+                return sortedAll.filter(t => {
+                    if (pid === 'other') return !t.project || t.project === 'other';
+                    return t.project === pid;
+                });
+            };
+
+            const filteredTasks = currentFilter === 'all' ? sortedAll : sortedAll.filter(t => {
+                if (currentFilter === 'other') return !t.project || t.project === 'other';
+                return t.project === currentFilter;
+            });
+            const filteredCompleted = currentFilter === 'all' ? completedTasks : completedTasks.filter(t => t.project === currentFilter || (!t.project && currentFilter === 'other'));
+
+            // ─── JSON IO ────────────────────────────────
+            const exportToJson = () => {
+                const d = { tasks, completedTasks, projects, notesPages, projectNotes };
+                const b = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+                const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'tasks-' + new Date().toISOString().split('T')[0] + '.json'; a.click(); URL.revokeObjectURL(u);
+            };
+            const importFromJson = (e) => {
+                const f = e.target.files[0]; if (!f) return;
+                const r = new FileReader(); r.onload = (ev) => { try { const d = JSON.parse(ev.target.result); setTasks(d.tasks || []); setCompletedTasks(d.completedTasks || []); if (d.projects) setProjects(p => ({ ...p, ...d.projects, other: p.other })); if (d.notesPages) setNotesPages(d.notesPages); if (d.projectNotes) setProjectNotes(d.projectNotes); } catch(_) { alert('Invalid JSON'); } }; r.readAsText(f); e.target.value = '';
+            };
+
+            // ─── Gist Sync Functions ─────────────────────
+            const gistFileName = 'taskmanager-data.json';
+            const getAllData = () => ({ tasks, completedTasks, projects, notesPages, projectNotes, projectOrder, gcalEventMap: Object.fromEntries(Object.entries(gcalEventMap)) });
+
+            const pushToGist = async () => {
+                if (!gistToken) { setSyncStatus('No token set'); return; }
+                setSyncStatus('pushing');
+                const body = { description: 'TaskManager Sync', public: false, files: { [gistFileName]: { content: JSON.stringify(getAllData(), null, 2) } } };
+                try {
+                    let res;
+                    if (gistId) {
+                        res = await fetch('https://api.github.com/gists/' + gistId, { method: 'PATCH', headers: { 'Authorization': 'token ' + gistToken, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    } else {
+                        res = await fetch('https://api.github.com/gists', { method: 'POST', headers: { 'Authorization': 'token ' + gistToken, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    }
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const data = await res.json();
+                    if (!gistId) setGistId(data.id);
+                    const now = new Date().toISOString();
+                    setLastSyncTime(now);
+                    setSyncStatus('Pushed');
+                    setTimeout(() => setSyncStatus('idle'), 3000);
+                } catch (e) {
+                    setSyncStatus('Push failed: ' + e.message);
+                }
+            };
+
+            const pullFromGist = async () => {
+                if (!gistToken || !gistId) { setSyncStatus('No token or Gist ID'); return; }
+                setSyncStatus('pulling');
+                try {
+                    const res = await fetch('https://api.github.com/gists/' + gistId, { headers: { 'Authorization': 'token ' + gistToken } });
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const data = await res.json();
+                    const file = data.files[gistFileName];
+                    if (!file) throw new Error('File not found in Gist');
+                    const d = JSON.parse(file.content);
+                    if (d.tasks) setTasks(d.tasks);
+                    if (d.completedTasks) setCompletedTasks(d.completedTasks);
+                    if (d.projects) setProjects(p => ({ ...p, ...d.projects, other: p.other || d.projects.other }));
+                    if (d.notesPages) setNotesPages(d.notesPages);
+                    if (d.projectNotes) setProjectNotes(d.projectNotes);
+                    if (d.projectOrder) setProjectOrder(d.projectOrder);
+                    if (d.gcalEventMap) setGcalEventMap(d.gcalEventMap);
+                    const now = new Date().toISOString();
+                    setLastSyncTime(now);
+                    setSyncStatus('Pulled');
+                    setTimeout(() => setSyncStatus('idle'), 3000);
+                } catch (e) {
+                    setSyncStatus('Pull failed: ' + e.message);
+                }
+            };
+
+            const openSyncSetup = () => { setSetupToken(gistToken); setSetupGistId(gistId); setShowSyncSetup(true); };
+            const saveSyncSetup = () => {
+                const token = setupToken.trim();
+                setGistToken(token);
+                setGistId(setupGistId.trim());
+                setShowSyncSetup(false);
+                if (token) {
+                    fetch('https://api.github.com/user', { headers: { 'Authorization': 'token ' + token } })
+                        .then(r => r.json())
+                        .then(u => { if (u.login) setGhUser(u.login); })
+                        .catch(() => {});
+                }
+            };
+
+            // Auto-sync every 5 minutes when signed in
+            React.useEffect(() => {
+                if (!gistToken) return;
+                const interval = setInterval(() => {
+                    pushToGist();
+                }, 5 * 60 * 1000);
+                return () => clearInterval(interval);
+            }, [gistToken, gistId]);
+
+            const tasksWithDeadlines = tasks.filter(t => t.deadline).length;
+            const syncedCount = Object.keys(gcalEventMap).filter(id => tasks.some(t => String(t.id) === id && t.deadline)).length;
+
+            // ═════════════════════════════════════════════
+            return (
+                <div>
+                    <div className="card">
+                        {/* ── HEADER ──────────────────────────── */}
+                        <div className="header-container" style={{ background: currentTheme.gradient }}>
+                            <div className="header-left">
+                                <img src="icon-192.png" alt="Logo" className="header-logo" />
+                                <h1 className="header-title">Quantum Tasks</h1>
+                            </div>
+                            <div className="header-center">
+                                {(() => { const w = analyzeWorkload(tasks); return (
+                                <div className="workload-message">
+                                    <div className="message-main">{w.message}</div>
+                                    <div className="message-advice">{w.advice}</div>
+                                    <div className="message-workload">{w.workload}</div>
+                                </div>
+                                ); })()}
+                                <form className="google-search-bar" onSubmit={doSearch}>
+                                    <span className="search-icon">&#128269;</span>
+                                    <input type="text" className="search-input" value={searchQuery}
+                                        onChange={e => setSearchQuery(e.target.value)}
+                                        placeholder="Search Google..." />
+                                    <button type="submit" className="search-btn">Go</button>
+                                </form>
+                            </div>
+                            <div className="header-right">
+                                <button onClick={openSyncSetup} className={'btn-secondary sync-header-btn' + (syncStatus === 'pushing' || syncStatus === 'pulling' ? ' sync-active' : '') + (gistToken ? ' sync-connected' : '')} title={gistToken ? (lastSyncTime ? 'Last synced ' + formatNoteDate(lastSyncTime) : 'Sync configured') : 'Set up sync'}>
+                                    {gistToken ? '\u2713 ' + (ghUser || 'Synced') : '\u21C5 Sync'}
+                                </button>
+                                <button onClick={() => setShowThemePicker(!showThemePicker)} className="btn-secondary theme-toggle-btn" title="Change theme">
+                                    &#9783; Theme
+                                </button>
+                                <button onClick={() => generateICS(tasks)} className="btn-secondary" title="Download .ics">Export .ics</button>
+                                <button onClick={exportToJson} className="btn-secondary">Export JSON</button>
+                                <label className="btn-secondary">Import JSON<input type="file" accept=".json" onChange={importFromJson} className="hidden" /></label>
+                            </div>
+                        </div>
+
+                        {/* ── THEME PICKER ────────────────────── */}
+                        {showThemePicker && (
+                            <div className="theme-picker">
+                                {Object.entries(THEMES).map(([id, t]) => (
+                                    <button key={id}
+                                        className={'theme-swatch' + (theme === id ? ' theme-active' : '')}
+                                        style={{ background: t.gradient }}
+                                        onClick={() => { setTheme(id); setShowThemePicker(false); }}
+                                        title={t.name}>
+                                        <span className="theme-swatch-label">{t.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* ── PROJECT TABS ────────────────────── */}
+                        <div className="project-tabs">
+                            <button className={'project-tab ' + (currentFilter === 'all' ? 'active' : '')} onClick={() => setCurrentFilter('all')}>All</button>
+                            {projectIds.map(pid => (
+                                <button key={pid}
+                                    className={'project-tab ' + (currentFilter === pid ? 'active' : '') + (draggedCol === pid ? ' ptab-dragging' : '') + (dragOverCol === pid ? ' ptab-drag-over' : '')}
+                                    draggable
+                                    onDragStart={() => onColDragStart(pid)}
+                                    onDragOver={(e) => onColDragOver(e, pid)}
+                                    onDrop={() => onColDrop(pid)}
+                                    onDragEnd={onColDragEnd}
+                                    onClick={() => setCurrentFilter(pid)}
+                                    style={{ borderLeft: currentFilter !== pid ? '3px solid ' + projects[pid].color : 'none' }}>
+                                    {projects[pid].name}
+                                    {pid !== 'other' && <span className="project-delete-x" onClick={e => { e.stopPropagation(); deleteProject(pid); }}>&times;</span>}
+                                </button>
+                            ))}
+                            <button className="project-tab add-project-tab" onClick={() => setShowAddProject(true)}>+ Project</button>
+                        </div>
+
+                        {/* ── VIEW TOGGLE ─────────────────────── */}
+                        <div className="view-toggle">
+                            <button className={'view-toggle-btn ' + (activeTab === 'tasks' ? 'active' : '')} onClick={() => setActiveTab('tasks')}>Tasks</button>
+                            <button className={'view-toggle-btn ' + (activeTab === 'notes' ? 'active' : '')} onClick={() => setActiveTab('notes')}>Notes</button>
+                            <button className={'view-toggle-btn ' + (activeTab === 'calendar' ? 'active' : '')} onClick={() => setActiveTab('calendar')}>Google Calendar</button>
+                        </div>
+                        <div className="section-divider"></div>
+
+                        {/* ═══ TASKS VIEW ════════════════════════ */}
+                        {activeTab === 'tasks' && (
+                            <div className="dashboard-content">
+                                {/* ── TOP PRIORITY ROW ───────────── */}
+                                {top4.length > 0 && (
+                                    <div className="top-priority-section">
+                                        <div className="section-label">Top Priority</div>
+                                        <div className="top-priority-row">
+                                            {top4.map(task => (
+                                                <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
+                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={false} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ── PROJECT COLUMNS + NOTES ────── */}
+                                <div className="columns-and-notes" ref={containerRef}>
+                                    <div className="project-columns-area">
+                                        {currentFilter === 'all' ? (
+                                            /* All: show each project as a column */
+                                            <div className="project-columns">
+                                                {projectIds.filter(pid => getProjectTasks(pid).length > 0).map(pid => (
+                                                    <div key={pid}
+                                                        className={'project-column' + (draggedCol === pid ? ' pcol-dragging' : '') + (dragOverCol === pid ? ' pcol-drag-over' : '')}
+                                                        draggable
+                                                        onDragStart={() => onColDragStart(pid)}
+                                                        onDragOver={(e) => onColDragOver(e, pid)}
+                                                        onDrop={() => onColDrop(pid)}
+                                                        onDragEnd={onColDragEnd}>
+                                                        <div className="pcol-header" style={{ backgroundColor: projects[pid].color }}>
+                                                            <span className="pcol-drag-handle" title="Drag to reorder">&#9776;</span>
+                                                            {projects[pid].name}
+                                                            <span className="pcol-count">{getProjectTasks(pid).length}</span>
+                                                        </div>
+                                                        <div className="pcol-tasks">
+                                                            {getProjectTasks(pid).map(task => (
+                                                                <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
+                                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={true} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {/* Add task column */}
+                                                <div className="project-column add-col">
+                                                    <div className="add-task-card" onClick={() => setEditingTask({
+                                                        id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                        project: 'other', deadline: '', notes: ''
+                                                    })}>
+                                                        <span className="add-icon">+</span>
+                                                        <span>Add Task</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            /* Filtered: show single project tasks as a grid */
+                                            <div>
+                                                <div className="section-label" style={{ color: projects[currentFilter] ? projects[currentFilter].color : undefined }}>
+                                                    {(projects[currentFilter] || projects.other).name} ({filteredTasks.length})
+                                                </div>
+                                                <div className="filtered-grid">
+                                                    <div className="add-task-card" onClick={() => setEditingTask({
+                                                        id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                        project: currentFilter, deadline: '', notes: ''
+                                                    })}>
+                                                        <span className="add-icon">+</span>
+                                                        <span>Add Task</span>
+                                                    </div>
+                                                    {filteredTasks.map(task => (
+                                                        <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
+                                                            onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={false} />
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Completed */}
+                                        <div style={{ marginTop: '1rem' }}>
+                                            <button onClick={() => setShowCompleted(!showCompleted)} className="completed-toggle">
+                                                <span>Completed ({filteredCompleted.length})</span>
+                                                <span>{showCompleted ? '\u25BC' : '\u25B6'}</span>
+                                            </button>
+                                            {showCompleted && (
+                                                <div className="completed-grid">
+                                                    {filteredCompleted.map(task => {
+                                                        const proj = projects[task.project || 'other'] || projects.other;
+                                                        return (
+                                                            <div key={task.id} className="tcard tcard-completed" style={{ borderLeftColor: proj.color }}>
+                                                                <div className="tcard-body">
+                                                                    <div className="tcard-name">{task.name}</div>
+                                                                    <div className="tcard-meta">
+                                                                        <span className="tcard-project" style={{ backgroundColor: proj.color }}>{proj.name}</span>
+                                                                    </div>
+                                                                    <div className="tcard-stats">
+                                                                        <span>Completed {formatDate(task.completedAt)}</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="tcard-actions">
+                                                                    <button onClick={() => revertTask(task)} className="tcard-btn tcard-btn-edit" title="Revert">&larr;</button>
+                                                                    <button onClick={() => removeCompletedTask(task.id)} className="tcard-btn tcard-btn-del" title="Delete">&#10006;</button>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* ── RESIZE HANDLE ─────────────── */}
+                                    <div className="resize-handle" onMouseDown={startResize} title="Drag to resize">
+                                        <div className="resize-handle-bar"></div>
+                                    </div>
+
+                                    {/* ── NOTES SIDEBAR ──────────────── */}
+                                    <div className="notes-sidebar" style={{ width: notesPanelWidth, minWidth: notesPanelWidth, maxWidth: notesPanelWidth }}>
+                                        <div className="notes-sidebar-label">Notes</div>
+                                        <textarea
+                                            value={projectNotes[currentFilter === 'all' ? 'general' : currentFilter] || ''}
+                                            onChange={(e) => {
+                                                const k = currentFilter === 'all' ? 'general' : currentFilter;
+                                                setProjectNotes(p => ({ ...p, [k]: e.target.value }));
+                                            }}
+                                            className="notes-textarea"
+                                            placeholder={'Notes for ' + (currentFilter === 'all' ? 'general' : (projects[currentFilter] || projects.other).name) + '...'}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ NOTES VIEW ═════════════════════════ */}
+                        {activeTab === 'notes' && (
+                            <div className="notes-app">
+                                {/* Notes list sidebar */}
+                                <div className="notes-list-panel">
+                                    <div className="notes-list-header">
+                                        <span className="notes-list-title">Notes</span>
+                                        <span className="notes-list-count">{notesPages.length}</span>
+                                        <button className="notes-new-btn" onClick={openNewNote} title="New note">+</button>
+                                    </div>
+                                    <div className="notes-search-bar">
+                                        <input type="text" className="notes-search-input" value={notesSearch}
+                                            onChange={e => setNotesSearch(e.target.value)} placeholder="Search notes..." />
+                                    </div>
+                                    <div className="notes-list">
+                                        {filteredNotes.length === 0 && (
+                                            <div className="notes-list-empty">
+                                                {notesSearch ? 'No matches' : 'No notes yet'}
+                                            </div>
+                                        )}
+                                        {filteredNotes.map(note => (
+                                            <div key={note.id}
+                                                className={'notes-list-item' + (activeNoteId === note.id ? ' notes-list-active' : '')}
+                                                onClick={() => setActiveNoteId(note.id)}>
+                                                <div className="notes-item-top">
+                                                    {renamingNoteId === note.id ? (
+                                                        <input className="notes-rename-input" value={renameValue}
+                                                            onChange={e => setRenameValue(e.target.value)}
+                                                            onBlur={finishRename}
+                                                            onKeyDown={e => { if (e.key === 'Enter') finishRename(); if (e.key === 'Escape') setRenamingNoteId(null); }}
+                                                            onClick={e => e.stopPropagation()} autoFocus />
+                                                    ) : (
+                                                        <span className="notes-item-title">{note.title}</span>
+                                                    )}
+                                                    <span className="notes-item-date">{formatNoteDate(note.updatedAt)}</span>
+                                                </div>
+                                                <div className="notes-item-meta">
+                                                    {note.project && note.project !== 'general' && (() => {
+                                                        const p = projects[note.project] || null;
+                                                        return p ? <span className="notes-item-project" style={{ backgroundColor: p.color }}>{p.name}</span> : null;
+                                                    })()}
+                                                    <span className="notes-item-preview">
+                                                        {(() => { const t = stripHtml(note.content); return t ? (t.length > 80 ? t.slice(0, 80) + '...' : t) : 'Empty note'; })()}
+                                                    </span>
+                                                </div>
+                                                <div className="notes-item-actions" onClick={e => e.stopPropagation()}>
+                                                    <button className="notes-item-btn" onClick={e => startRename(note, e)} title="Rename">&#9998;</button>
+                                                    <button className="notes-item-btn notes-item-btn-del" onClick={() => deleteNote(note.id)} title="Delete">&#10006;</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Note editor */}
+                                <div className="notes-editor-panel">
+                                    {activeNote ? (
+                                        <React.Fragment>
+                                            <div className="notes-editor-header">
+                                                <h2 className="notes-editor-title">{activeNote.title}</h2>
+                                                {activeNote.project && activeNote.project !== 'general' && (() => {
+                                                    const p = projects[activeNote.project] || null;
+                                                    return p ? <span className="notes-editor-project" style={{ backgroundColor: p.color }}>{p.name}</span> : null;
+                                                })()}
+                                                <span className="notes-editor-date">Last edited {formatNoteDate(activeNote.updatedAt)}</span>
+                                            </div>
+                                            <div className="notes-toolbar">
+                                                <select className="notes-tb-select" onChange={e => { execFmt('fontName', e.target.value); e.target.value = ''; }} defaultValue="">
+                                                    <option value="" disabled>Font</option>
+                                                    {NOTE_FONTS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                                                </select>
+                                                <select className="notes-tb-select" onChange={e => { execFmt('fontSize', e.target.value); e.target.value = ''; }} defaultValue="">
+                                                    <option value="" disabled>Size</option>
+                                                    {NOTE_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                                                </select>
+                                                <span className="notes-tb-sep"></span>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('formatBlock', 'h1')} title="Heading 1"><strong>H1</strong></button>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('formatBlock', 'h2')} title="Heading 2"><strong>H2</strong></button>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('formatBlock', 'h3')} title="Heading 3"><strong>H3</strong></button>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('formatBlock', 'p')} title="Paragraph">P</button>
+                                                <span className="notes-tb-sep"></span>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('bold')} title="Bold"><strong>B</strong></button>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('italic')} title="Italic"><em>I</em></button>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('underline')} title="Underline"><u>U</u></button>
+                                                <span className="notes-tb-sep"></span>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('insertUnorderedList')} title="Bullet list">&#8226; List</button>
+                                                <button className="notes-tb-btn" onClick={() => execFmt('insertOrderedList')} title="Numbered list">1. List</button>
+                                                <span className="notes-tb-sep"></span>
+                                                <div className="notes-tb-colors">
+                                                    {NOTE_COLORS.map(c => (
+                                                        <button key={c} className="notes-tb-color-btn" style={{ backgroundColor: c }} onClick={() => execFmt('foreColor', c)} title={c}></button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="notes-editor-area"
+                                                ref={editorRef}
+                                                contentEditable={true}
+                                                onInput={onEditorInput}
+                                                suppressContentEditableWarning={true}
+                                                data-placeholder="Start typing..."
+                                            ></div>
+                                        </React.Fragment>
+                                    ) : (
+                                        <div className="notes-editor-empty">
+                                            <div className="notes-editor-empty-icon">&#128221;</div>
+                                            <p>Select a note or create a new one</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ NEW NOTE MODAL ═════════════════════ */}
+                        {showNewNote && (
+                            <div className="edit-overlay" onClick={() => setShowNewNote(false)}>
+                                <div className="edit-modal new-note-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="modal-title">New Note</h3>
+                                    <div className="slider-container">
+                                        <label className="slider-label">Title</label>
+                                        <input type="text" value={newNoteTitle} onChange={e => setNewNoteTitle(e.target.value)}
+                                            className="input" placeholder="Note title..." autoFocus
+                                            onKeyDown={e => e.key === 'Enter' && createNote()} />
+                                    </div>
+                                    <div className="slider-container">
+                                        <label className="slider-label">Project</label>
+                                        <select value={newNoteProject} onChange={e => setNewNoteProject(e.target.value)} className="input">
+                                            <option value="general">General</option>
+                                            {projectIds.map(pid => <option key={pid} value={pid}>{projects[pid].name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="modal-actions">
+                                        <button onClick={() => setShowNewNote(false)} className="btn">Cancel</button>
+                                        <button onClick={createNote} className="btn btn-primary">Create</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ GOOGLE CALENDAR VIEW ══════════════ */}
+                        {activeTab === 'calendar' && (
+                            <div className="gcal-view">
+                                <div className="gcal-control-bar">
+                                    {!gcalClientId ? (
+                                        <div className="gcal-bar-row"><span className="gcal-bar-label">Google Calendar not connected</span><button className="btn btn-primary" onClick={openSetup}>Set Up Sync</button></div>
+                                    ) : !gcalSignedIn ? (
+                                        <div className="gcal-bar-row"><span className="gcal-bar-label">Sign in to sync tasks</span><div className="gcal-bar-actions"><button className="btn btn-primary" onClick={signIn} disabled={!apisLoaded}>{apisLoaded ? 'Sign in with Google' : 'Loading...'}</button><button className="gcal-settings-btn" onClick={openSetup}>&#9881;</button></div></div>
+                                    ) : (
+                                        <div className="gcal-bar-row"><div className="gcal-bar-info"><span className="gcal-connected-dot"></span><span className="gcal-bar-label">Connected</span>{gcalStatus && <span className="gcal-bar-status">{gcalStatus}</span>}<span className="gcal-bar-count">{syncedCount}/{tasksWithDeadlines} synced</span></div><div className="gcal-bar-actions"><button className="btn btn-primary" onClick={syncAllTasks} disabled={gcalSyncing}>{gcalSyncing ? 'Syncing...' : 'Sync All'}</button><button className="btn" onClick={signOut}>Sign Out</button><button className="gcal-settings-btn" onClick={openSetup}>&#9881;</button></div></div>
+                                    )}
+                                </div>
+                                {gcalEmbedUrl ? (
+                                    <div className="gcal-embed-wrapper"><iframe key={gcalRefreshKey} src={gcalEmbedUrl + (gcalEmbedUrl.includes('?') ? '&' : '?') + '_r=' + gcalRefreshKey} className="gcal-iframe" frameBorder="0" scrolling="no" title="Google Calendar"></iframe></div>
+                                ) : (
+                                    <div className="gcal-empty-state"><div className="gcal-empty-icon">&#128197;</div><h3>No Calendar URL</h3><p>Add your Google Calendar embed URL.</p><button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={openSetup}>Add URL</button></div>
+                                )}
+                                <div className="gcal-hint"><strong>How sync works:</strong> Tasks with deadlines become Google Calendar events automatically.</div>
+                            </div>
+                        )}
+
+                        {/* ═══ MATTERMOST VIEW ═════════════════ */}
+                        {/* ═══ EDIT / ADD TASK MODAL ═════════════ */}
+                        {editingTask && (
+                            <div className="edit-overlay" onClick={() => setEditingTask(null)}>
+                                <div className="edit-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="modal-title">{editingTask.id === 'new' ? 'New Task' : 'Edit: ' + editingTask.name}</h3>
+                                    <input type="text" value={editingTask.name} onChange={e => setEditingTask({ ...editingTask, name: e.target.value })}
+                                        className="input" placeholder="Task name..." autoFocus />
+                                    <div className="grid">
+                                        {['Importance', 'Length', 'Difficulty'].map(type => (
+                                            <div key={type} className="slider-container">
+                                                <label className="slider-label">{type}: {editingTask[type.toLowerCase()]}</label>
+                                                <input type="range" min="1" max="5" value={editingTask[type.toLowerCase()]}
+                                                    onChange={e => setEditingTask({ ...editingTask, [type.toLowerCase()]: parseInt(e.target.value) })}
+                                                    className="slider" style={{ '--slider-value': ((editingTask[type.toLowerCase()] - 1) * 25) + '%' }} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="modal-row-2">
+                                        <div className="slider-container">
+                                            <label className="slider-label">Deadline</label>
+                                            <input type="datetime-local" value={editingTask.deadline || ''} onChange={e => setEditingTask({ ...editingTask, deadline: e.target.value || null })} className="input" />
+                                        </div>
+                                        <div className="slider-container">
+                                            <label className="slider-label">Project</label>
+                                            <select value={editingTask.project || 'other'} onChange={e => setEditingTask({ ...editingTask, project: e.target.value })} className="input">
+                                                {projectIds.map(pid => <option key={pid} value={pid}>{projects[pid].name}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    {/* ── Task Notes ─────────── */}
+                                    <div className="slider-container" style={{ marginTop: '0.5rem' }}>
+                                        <label className="slider-label">Notes</label>
+                                        <textarea value={editingTask.notes || ''} onChange={e => setEditingTask({ ...editingTask, notes: e.target.value })}
+                                            className="input task-notes-input" placeholder="Add notes to this task..." rows={3} />
+                                    </div>
+                                    <div className="modal-actions">
+                                        <button onClick={() => setEditingTask(null)} className="btn">Cancel</button>
+                                        <button onClick={saveEdit} className="btn btn-primary">{editingTask.id === 'new' ? 'Add Task' : 'Save'}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ ADD PROJECT MODAL ═════════════════ */}
+                        {showAddProject && (
+                            <div className="edit-overlay" onClick={() => setShowAddProject(false)}>
+                                <div className="edit-modal add-project-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="modal-title">Add Project</h3>
+                                    <input type="text" value={newProjectName} onChange={e => setNewProjectName(e.target.value)} className="input" placeholder="Project name..." autoFocus onKeyDown={e => e.key === 'Enter' && addProject()} />
+                                    <div className="color-picker-section">
+                                        <label className="slider-label" style={{ marginBottom: '0.5rem' }}>Color:</label>
+                                        <div className="color-grid">
+                                            {PROJECT_COLORS.map(c => <button key={c} className={'color-swatch ' + (newProjectColor === c ? 'selected' : '')} style={{ backgroundColor: c }} onClick={() => setNewProjectColor(c)} />)}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                            <label className="slider-label">Custom:</label>
+                                            <input type="color" value={newProjectColor} onChange={e => setNewProjectColor(e.target.value)} className="color-input-native" />
+                                        </div>
+                                    </div>
+                                    <div className="project-preview"><span>Preview: </span><span className="tcard-project" style={{ backgroundColor: newProjectColor }}>{newProjectName || 'Name'}</span></div>
+                                    <div className="modal-actions"><button onClick={() => setShowAddProject(false)} className="btn">Cancel</button><button onClick={addProject} className="btn btn-primary">Add</button></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ GCAL SETUP MODAL ══════════════════ */}
+                        {showGcalSetup && (
+                            <div className="edit-overlay" onClick={() => setShowGcalSetup(false)}>
+                                <div className="edit-modal gcal-setup-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="modal-title">Google Calendar Setup</h3>
+                                    <div className="gcal-setup-section">
+                                        <h4 className="gcal-setup-heading">1. Embed URL <span className="gcal-optional">(view calendar)</span></h4>
+                                        <div className="gcal-instructions"><ol><li>Open <a href="https://calendar.google.com/calendar/r/settings" target="_blank">Calendar Settings</a></li><li>Select calendar &rarr; Integrate calendar</li><li>Copy embed code or URL</li></ol></div>
+                                        <textarea value={setupEmbedUrl} onChange={e => setSetupEmbedUrl(e.target.value)} className="input" placeholder="Paste embed URL or iframe..." rows={2} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                                    </div>
+                                    <div className="gcal-setup-section">
+                                        <h4 className="gcal-setup-heading">2. Calendar ID <span className="gcal-optional">(which calendar)</span></h4>
+                                        <div className="gcal-instructions"><ol><li>In Calendar Settings, select the target calendar</li><li>Copy the <strong>Calendar ID</strong></li></ol></div>
+                                        <input type="text" value={setupCalendarId} onChange={e => setSetupCalendarId(e.target.value)} className="input" placeholder="Leave blank for primary" style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                                    </div>
+                                    <div className="gcal-setup-section">
+                                        <h4 className="gcal-setup-heading">3. Client ID <span className="gcal-optional">(API access)</span></h4>
+                                        <div className="gcal-instructions"><ol><li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a></li><li>Enable Calendar API, create OAuth 2.0 Client ID</li><li>Add your site URL to Authorized JS origins</li></ol></div>
+                                        <input type="text" value={setupClientId} onChange={e => setSetupClientId(e.target.value)} className="input" placeholder="123456-xxx.apps.googleusercontent.com" style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                                    </div>
+                                    <div className="modal-actions"><button onClick={() => setShowGcalSetup(false)} className="btn">Cancel</button><button onClick={saveSetup} className="btn btn-primary">Save</button></div>
+                                </div>
+                            </div>
+                        )}
+                        {/* ═══ SYNC SETUP MODAL ════════════════════ */}
+                        {showSyncSetup && (
+                            <div className="edit-overlay" onClick={() => setShowSyncSetup(false)}>
+                                <div className="edit-modal sync-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="modal-title">Sync</h3>
+
+                                    {gistToken ? (
+                                        <React.Fragment>
+                                            {/* Signed-in state */}
+                                            <div className="sync-signed-in">
+                                                <div className="sync-user-row">
+                                                    <span className="sync-connected-dot"></span>
+                                                    <span className="sync-user-label">Signed in{ghUser ? ' as ' : ''}{ghUser && <strong>{ghUser}</strong>}</span>
+                                                    <button className="sync-signout-btn" onClick={signOutGist}>Sign out</button>
+                                                </div>
+                                                {gistId && <div className="sync-gist-id">Gist: <code>{gistId.slice(0, 12)}...</code></div>}
+                                            </div>
+
+                                            <div className="sync-actions-bar">
+                                                <button onClick={() => { setShowSyncSetup(false); pushToGist(); }} className="btn btn-primary" disabled={syncStatus === 'pushing' || syncStatus === 'pulling'}>
+                                                    {syncStatus === 'pushing' ? 'Pushing...' : '\u2191 Push'}
+                                                </button>
+                                                <button onClick={() => { setShowSyncSetup(false); pullFromGist(); }} className="btn" disabled={syncStatus === 'pushing' || syncStatus === 'pulling' || !gistId}>
+                                                    {syncStatus === 'pulling' ? 'Pulling...' : '\u2193 Pull'}
+                                                </button>
+                                                {lastSyncTime && <span className="sync-last-time">Last sync: {formatNoteDate(lastSyncTime)}</span>}
+                                            </div>
+
+                                            {/* Advanced: manual Gist ID override */}
+                                            <details className="sync-advanced">
+                                                <summary>Advanced</summary>
+                                                <div className="sync-section">
+                                                    <label className="slider-label">Gist ID</label>
+                                                    <p className="sync-hint">Override Gist ID to sync with a specific Gist.</p>
+                                                    <input type="text" value={setupGistId} onChange={e => setSetupGistId(e.target.value)}
+                                                        className="input" placeholder={gistId || 'Auto-created on first push'}
+                                                        style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                                                    <button onClick={() => { if (setupGistId.trim()) { setGistId(setupGistId.trim()); } setShowSyncSetup(false); }} className="btn" style={{ marginTop: '0.5rem' }}>Update</button>
+                                                </div>
+                                            </details>
+                                        </React.Fragment>
+                                    ) : (
+                                        <React.Fragment>
+                                            {/* Not signed in */}
+                                            <div className="sync-signin-section">
+                                                <p className="sync-hint" style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                                                    Sign in with GitHub to sync your tasks, notes, and settings across all your devices.
+                                                </p>
+                                                <button className="sync-github-btn" onClick={signInWithGitHub}>
+                                                    <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+                                                    Sign in with GitHub
+                                                </button>
+                                            </div>
+
+                                            {/* Fallback: manual token */}
+                                            <details className="sync-advanced">
+                                                <summary>Use token instead</summary>
+                                                <div className="sync-section">
+                                                    <label className="slider-label">GitHub Personal Access Token</label>
+                                                    <p className="sync-hint">
+                                                        Create at <a href="https://github.com/settings/tokens/new?scopes=gist&description=TaskManager+Sync" target="_blank" rel="noopener noreferrer">github.com/settings/tokens</a> with <strong>gist</strong> scope.
+                                                    </p>
+                                                    <input type="password" value={setupToken} onChange={e => setSetupToken(e.target.value)}
+                                                        className="input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                                                        style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                                                </div>
+                                                <div className="sync-section">
+                                                    <label className="slider-label">Gist ID <span className="sync-optional">(optional)</span></label>
+                                                    <input type="text" value={setupGistId} onChange={e => setSetupGistId(e.target.value)}
+                                                        className="input" placeholder="Auto-created on first push"
+                                                        style={{ fontFamily: 'monospace', fontSize: '0.85rem' }} />
+                                                </div>
+                                                <div className="modal-actions">
+                                                    <button onClick={saveSyncSetup} className="btn btn-primary">Save Token</button>
+                                                </div>
+                                            </details>
+                                        </React.Fragment>
+                                    )}
+
+                                    {syncStatus !== 'idle' && syncStatus !== 'pushing' && syncStatus !== 'pulling' && !syncStatus.startsWith('Sign') && (
+                                        <div className={'sync-status-msg' + (syncStatus.includes('failed') || syncStatus.includes('Failed') ? ' sync-error' : ' sync-ok')}>
+                                            {syncStatus}
+                                        </div>
+                                    )}
+
+                                    <div className="modal-actions" style={{ marginTop: '0.5rem' }}>
+                                        <button onClick={() => setShowSyncSetup(false)} className="btn">Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+        ReactDOM.render(<TaskMatrix />, document.getElementById('root'));
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js').catch(function() {});
+        }
+    </script>
+</body>
+</html>
