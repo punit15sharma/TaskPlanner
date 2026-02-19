@@ -1,9 +1,5 @@
 // Default projects - users can add more
 const DEFAULT_PROJECTS = {
-   'HH bbyy': { name: 'HH bbyy', color: '#3b82f6' },
-   'EF Tracking': { name: 'EF Tracking', color: '#ef4444' },
-   'FCC 6Jets': { name: 'FCC 6Jets', color: '#8b5cf6' },
-   'misc-atlas': { name: 'Misc. ATLAS', color: '#f59e0b' },
    'other': { name: 'Other', color: '#6b7280' }
 };
 
