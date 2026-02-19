@@ -194,6 +194,9 @@
             const [showAddProject, setShowAddProject] = React.useState(false);
             const [newProjectName, setNewProjectName] = React.useState('');
             const [newProjectColor, setNewProjectColor] = React.useState(PROJECT_COLORS[0]);
+            const [editingProject, setEditingProject] = React.useState(null);
+            const [editProjectName, setEditProjectName] = React.useState('');
+            const [editProjectColor, setEditProjectColor] = React.useState('');
             const [editingTask, setEditingTask] = React.useState(null);
 
             // ─── Theme State ────────────────────────────
@@ -552,6 +555,20 @@
                 if (currentFilter === pid) setCurrentFilter('all');
             };
 
+            const openEditProject = (pid, e) => {
+                e.stopPropagation();
+                setEditingProject(pid);
+                setEditProjectName(projects[pid].name);
+                setEditProjectColor(projects[pid].color);
+            };
+            const saveEditProject = () => {
+                if (!editingProject) return;
+                const name = editProjectName.trim();
+                if (!name) return;
+                setProjects(p => ({ ...p, [editingProject]: { ...p[editingProject], name, color: editProjectColor } }));
+                setEditingProject(null);
+            };
+
             // ─── Task CRUD ──────────────────────────────
             const completeTask = (task) => {
                 const el = document.getElementById('task-' + task.id); if (el) el.classList.add('celebrate');
@@ -779,6 +796,7 @@
                                     onClick={() => setCurrentFilter(pid)}
                                     style={{ borderLeft: currentFilter !== pid ? '3px solid ' + projects[pid].color : 'none' }}>
                                     {projects[pid].name}
+                                    {pid !== 'other' && <span className="project-edit-btn" onClick={e => openEditProject(pid, e)} title="Edit project">&#9998;</span>}
                                     {pid !== 'other' && <span className="project-delete-x" onClick={e => { e.stopPropagation(); deleteProject(pid); }}>&times;</span>}
                                 </button>
                             ))}
@@ -1145,6 +1163,28 @@
                                     </div>
                                     <div className="project-preview"><span>Preview: </span><span className="tcard-project" style={{ backgroundColor: newProjectColor }}>{newProjectName || 'Name'}</span></div>
                                     <div className="modal-actions"><button onClick={() => setShowAddProject(false)} className="btn">Cancel</button><button onClick={addProject} className="btn btn-primary">Add</button></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ EDIT PROJECT MODAL ══════════════════ */}
+                        {editingProject && (
+                            <div className="edit-overlay" onClick={() => setEditingProject(null)}>
+                                <div className="edit-modal add-project-modal" onClick={e => e.stopPropagation()}>
+                                    <h3 className="modal-title">Edit Project</h3>
+                                    <input type="text" value={editProjectName} onChange={e => setEditProjectName(e.target.value)} className="input" placeholder="Project name..." autoFocus onKeyDown={e => e.key === 'Enter' && saveEditProject()} />
+                                    <div className="color-picker-section">
+                                        <label className="slider-label" style={{ marginBottom: '0.5rem' }}>Color:</label>
+                                        <div className="color-grid">
+                                            {PROJECT_COLORS.map(c => <button key={c} className={'color-swatch ' + (editProjectColor === c ? 'selected' : '')} style={{ backgroundColor: c }} onClick={() => setEditProjectColor(c)} />)}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                            <label className="slider-label">Custom:</label>
+                                            <input type="color" value={editProjectColor} onChange={e => setEditProjectColor(e.target.value)} className="color-input-native" />
+                                        </div>
+                                    </div>
+                                    <div className="project-preview"><span>Preview: </span><span className="tcard-project" style={{ backgroundColor: editProjectColor }}>{editProjectName || 'Name'}</span></div>
+                                    <div className="modal-actions"><button onClick={() => setEditingProject(null)} className="btn">Cancel</button><button onClick={saveEditProject} className="btn btn-primary">Save</button></div>
                                 </div>
                             </div>
                         )}
