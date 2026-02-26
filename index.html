@@ -652,6 +652,10 @@
             // ─── Gist Sync Functions ─────────────────────
             const gistFileName = 'taskmanager-data.json';
             const getAllData = () => ({ tasks, completedTasks, projects, notesPages, projectNotes, projectOrder, gcalEventMap: Object.fromEntries(Object.entries(gcalEventMap)) });
+            const autoPushTimerRef = React.useRef(null);
+            const syncReadyRef = React.useRef(false);
+            const suppressAutoPushRef = React.useRef(false);
+            const lastAutoPulledGistRef = React.useRef('');
 
             const pushToGist = async () => {
                 if (!gistToken) { setSyncStatus('No token set'); return; }
@@ -678,6 +682,7 @@
 
             const pullFromGist = async () => {
                 if (!gistToken || !gistId) { setSyncStatus('No token or Gist ID'); return; }
+                suppressAutoPushRef.current = true;
                 setSyncStatus('pulling');
                 try {
                     const res = await fetch('https://api.github.com/gists/' + gistId, { headers: { 'Authorization': 'token ' + gistToken } });
@@ -699,6 +704,8 @@
                     setTimeout(() => setSyncStatus('idle'), 3000);
                 } catch (e) {
                     setSyncStatus('Pull failed: ' + e.message);
+                } finally {
+                    setTimeout(() => { suppressAutoPushRef.current = false; }, 250);
                 }
             };
 
@@ -716,14 +723,37 @@
                 }
             };
 
-            // Auto-sync every 5 minutes when signed in
+            // Auto-pull once when app opens (or when switching Gist IDs)
+            React.useEffect(() => {
+                if (!gistToken) {
+                    syncReadyRef.current = false;
+                    lastAutoPulledGistRef.current = '';
+                    return;
+                }
+                if (!gistId) {
+                    syncReadyRef.current = true;
+                    return;
+                }
+                if (lastAutoPulledGistRef.current === gistId) {
+                    syncReadyRef.current = true;
+                    return;
+                }
+                lastAutoPulledGistRef.current = gistId;
+                pullFromGist().finally(() => { syncReadyRef.current = true; });
+            }, [gistToken, gistId]);
+
+            // Auto-push after every change (debounced)
             React.useEffect(() => {
                 if (!gistToken) return;
-                const interval = setInterval(() => {
-                    pushToGist();
-                }, 5 * 60 * 1000);
-                return () => clearInterval(interval);
-            }, [gistToken, gistId]);
+                if (!syncReadyRef.current) return;
+                if (syncStatus === 'pushing' || syncStatus === 'pulling') return;
+                if (suppressAutoPushRef.current) return;
+                clearTimeout(autoPushTimerRef.current);
+                autoPushTimerRef.current = setTimeout(() => {
+                    if (!suppressAutoPushRef.current) pushToGist();
+                }, 1200);
+                return () => clearTimeout(autoPushTimerRef.current);
+            }, [gistToken, gistId, tasks, completedTasks, projects, notesPages, projectNotes, projectOrder, gcalEventMap, syncStatus]);
 
             const tasksWithDeadlines = tasks.filter(t => t.deadline).length;
             const syncedCount = Object.keys(gcalEventMap).filter(id => tasks.some(t => String(t.id) === id && t.deadline)).length;
