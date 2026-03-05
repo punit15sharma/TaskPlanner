@@ -45,13 +45,15 @@
 
     <script type="text/babel">
         /* ───────────────── Compact Task Card ──────────────── */
-        function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, onUpdateNotes, compact }) {
+        function TaskCard({ task, projects, gcalEventMap, onComplete, onEdit, onDelete, onUpdateNotes, onToggleSubtask, compact }) {
             const [expanded, setExpanded] = React.useState(false);
             const [editingNotes, setEditingNotes] = React.useState(false);
             const [localNotes, setLocalNotes] = React.useState(task.notes || '');
             const notesRef = React.useRef(null);
             const proj = projects[task.project || 'other'] || projects.other;
             const color = proj.color;
+            const subtasks = Array.isArray(task.subtasks) ? task.subtasks : [];
+            const doneSubtasks = subtasks.filter(s => s.done).length;
 
             // Keep local notes in sync if task changes externally
             React.useEffect(() => { setLocalNotes(task.notes || ''); }, [task.notes]);
@@ -59,6 +61,7 @@
             const toggle = (e) => {
                 if (e.target.closest('.tcard-actions')) return;
                 if (e.target.closest('.tcard-detail-notes')) return;
+                if (e.target.closest('.tcard-subtasks')) return;
                 setExpanded(prev => !prev);
             };
 
@@ -102,6 +105,7 @@
                                 <span>Imp {task.importance}</span>
                                 <span>Len {task.length}</span>
                                 <span>Diff {task.difficulty}</span>
+                                {subtasks.length > 0 && <span>Sub {doneSubtasks}/{subtasks.length}</span>}
                                 <span>{getDaysOld(task.createdAt)}d old</span>
                             </div>
                         )}
@@ -126,6 +130,25 @@
                                 <div className="tcard-detail-dates">
                                     <span>Added {formatDate(task.createdAt)} ({getDaysOld(task.createdAt)} days ago)</span>
                                     {task.deadline && <span>Deadline: {task.deadline.includes('T') ? new Date(task.deadline).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : new Date(task.deadline + 'T00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>}
+                                </div>
+                                <div className="tcard-subtasks" onClick={e => e.stopPropagation()}>
+                                    <div className="tcard-detail-notes-label">Subtasks {subtasks.length > 0 ? '(' + doneSubtasks + '/' + subtasks.length + ')' : ''}</div>
+                                    {subtasks.length === 0 ? (
+                                        <div className="tcard-subtasks-empty">No subtasks</div>
+                                    ) : (
+                                        <div className="tcard-subtasks-list">
+                                            {subtasks.map(st => (
+                                                <label key={st.id} className={'tcard-subtask-item' + (st.done ? ' done' : '')}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={!!st.done}
+                                                        onChange={() => onToggleSubtask && onToggleSubtask(task.id, st.id)}
+                                                    />
+                                                    <span>{st.text}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="tcard-detail-notes" onClick={e => e.stopPropagation()}>
                                     <div className="tcard-detail-notes-label">Notes</div>
@@ -174,14 +197,26 @@
 
         /* ───────────────── Main App ───────────────────────── */
         function TaskMatrix() {
+            const normalizeSubtasks = (subtasks) => {
+                if (!Array.isArray(subtasks)) return [];
+                return subtasks
+                    .map((s, idx) => ({
+                        id: s && s.id ? s.id : (Date.now() + '-' + idx),
+                        text: (s && s.text ? String(s.text) : '').trim(),
+                        done: !!(s && s.done),
+                    }))
+                    .filter(s => s.text);
+            };
+            const normalizeTask = (task) => ({ ...task, subtasks: normalizeSubtasks(task.subtasks) });
+
             // ─── Core State ─────────────────────────────
             const [tasks, setTasks] = React.useState(() => {
                 const s = localStorage.getItem('tasks');
-                return s ? JSON.parse(s) : [];
+                return s ? JSON.parse(s).map(normalizeTask) : [];
             });
             const [completedTasks, setCompletedTasks] = React.useState(() => {
                 const s = localStorage.getItem('completedTasks');
-                return s ? JSON.parse(s) : [];
+                return s ? JSON.parse(s).map(normalizeTask) : [];
             });
             const [showCompleted, setShowCompleted] = React.useState(false);
             const [currentFilter, setCurrentFilter] = React.useState('all');
@@ -198,6 +233,7 @@
             const [editProjectName, setEditProjectName] = React.useState('');
             const [editProjectColor, setEditProjectColor] = React.useState('');
             const [editingTask, setEditingTask] = React.useState(null);
+            const [newSubtaskText, setNewSubtaskText] = React.useState('');
 
             // ─── Theme State ────────────────────────────
             const [theme, setTheme] = React.useState(() => localStorage.getItem('appTheme') || 'ocean');
@@ -586,13 +622,22 @@
             };
             const removeTask = (id) => { setTasks(p => p.filter(t => t.id !== id)); removeOneFromGcal(id).then(refreshEmbed); };
             const updateTaskNotes = (id, notes) => { setTasks(p => p.map(t => t.id === id ? { ...t, notes } : t)); };
+            const toggleTaskSubtask = (taskId, subtaskId) => {
+                setTasks(p => p.map(t => {
+                    if (t.id !== taskId) return t;
+                    const subtasks = normalizeSubtasks(t.subtasks).map(st => st.id === subtaskId ? { ...st, done: !st.done } : st);
+                    return { ...t, subtasks };
+                }));
+            };
             const removeCompletedTask = (id) => { setCompletedTasks(p => p.filter(t => t.id !== id)); };
-            const startEditing = (task) => setEditingTask({ ...task });
+            const startEditing = (task) => { setEditingTask(normalizeTask({ ...task })); setNewSubtaskText(''); };
             const saveEdit = () => {
                 let saved;
-                if (editingTask.id === 'new') { saved = { ...editingTask, id: Date.now(), createdAt: new Date().toISOString() }; setTasks(p => [...p, saved]); }
-                else { saved = editingTask; setTasks(p => p.map(t => t.id === editingTask.id ? editingTask : t)); }
+                const withSubtasks = normalizeTask(editingTask);
+                if (editingTask.id === 'new') { saved = { ...withSubtasks, id: Date.now(), createdAt: new Date().toISOString() }; setTasks(p => [...p, saved]); }
+                else { saved = withSubtasks; setTasks(p => p.map(t => t.id === editingTask.id ? withSubtasks : t)); }
                 setEditingTask(null);
+                setNewSubtaskText('');
                 if (saved.deadline) syncOneTask(saved).then(refreshEmbed); else removeOneFromGcal(saved.id).then(refreshEmbed);
             };
 
@@ -646,7 +691,7 @@
             };
             const importFromJson = (e) => {
                 const f = e.target.files[0]; if (!f) return;
-                const r = new FileReader(); r.onload = (ev) => { try { const d = JSON.parse(ev.target.result); setTasks(d.tasks || []); setCompletedTasks(d.completedTasks || []); if (d.projects) setProjects(p => ({ ...p, ...d.projects, other: p.other })); if (d.notesPages) setNotesPages(d.notesPages); if (d.projectNotes) setProjectNotes(d.projectNotes); } catch(_) { alert('Invalid JSON'); } }; r.readAsText(f); e.target.value = '';
+                const r = new FileReader(); r.onload = (ev) => { try { const d = JSON.parse(ev.target.result); setTasks((d.tasks || []).map(normalizeTask)); setCompletedTasks((d.completedTasks || []).map(normalizeTask)); if (d.projects) setProjects(p => ({ ...p, ...d.projects, other: p.other })); if (d.notesPages) setNotesPages(d.notesPages); if (d.projectNotes) setProjectNotes(d.projectNotes); } catch(_) { alert('Invalid JSON'); } }; r.readAsText(f); e.target.value = '';
             };
 
             // ─── Gist Sync Functions ─────────────────────
@@ -686,8 +731,8 @@
                     const file = data.files[gistFileName];
                     if (!file) throw new Error('File not found in Gist');
                     const d = JSON.parse(file.content);
-                    if (d.tasks) setTasks(d.tasks);
-                    if (d.completedTasks) setCompletedTasks(d.completedTasks);
+                    if (d.tasks) setTasks(d.tasks.map(normalizeTask));
+                    if (d.completedTasks) setCompletedTasks(d.completedTasks.map(normalizeTask));
                     if (d.projects) setProjects(p => ({ ...p, ...d.projects, other: p.other || d.projects.other }));
                     if (d.notesPages) setNotesPages(d.notesPages);
                     if (d.projectNotes) setProjectNotes(d.projectNotes);
@@ -812,7 +857,7 @@
                                         <div className="top-priority-row">
                                             {top4.map(task => (
                                                 <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
-                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={false} />
+                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} onToggleSubtask={toggleTaskSubtask} compact={false} />
                                             ))}
                                         </div>
                                     </div>
@@ -840,17 +885,20 @@
                                                         <div className="pcol-tasks">
                                                             {getProjectTasks(pid).map(task => (
                                                                 <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
-                                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={true} />
+                                                                    onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} onToggleSubtask={toggleTaskSubtask} compact={true} />
                                                             ))}
                                                         </div>
                                                     </div>
                                                 ))}
                                                 {/* Add task column */}
                                                 <div className="project-column add-col">
-                                                    <div className="add-task-card" onClick={() => setEditingTask({
-                                                        id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
-                                                        project: 'other', deadline: '', notes: ''
-                                                    })}>
+                                                    <div className="add-task-card" onClick={() => {
+                                                        setEditingTask({
+                                                            id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                            project: 'other', deadline: '', notes: '', subtasks: []
+                                                        });
+                                                        setNewSubtaskText('');
+                                                    }}>
                                                         <span className="add-icon">+</span>
                                                         <span>Add Task</span>
                                                     </div>
@@ -863,16 +911,19 @@
                                                     {(projects[currentFilter] || projects.other).name} ({filteredTasks.length})
                                                 </div>
                                                 <div className="filtered-grid">
-                                                    <div className="add-task-card" onClick={() => setEditingTask({
-                                                        id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
-                                                        project: currentFilter, deadline: '', notes: ''
-                                                    })}>
+                                                    <div className="add-task-card" onClick={() => {
+                                                        setEditingTask({
+                                                            id: 'new', name: '', importance: 3, length: 3, difficulty: 3,
+                                                            project: currentFilter, deadline: '', notes: '', subtasks: []
+                                                        });
+                                                        setNewSubtaskText('');
+                                                    }}>
                                                         <span className="add-icon">+</span>
                                                         <span>Add Task</span>
                                                     </div>
                                                     {filteredTasks.map(task => (
                                                         <TaskCard key={task.id} task={task} projects={projects} gcalEventMap={gcalEventMap}
-                                                            onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} compact={false} />
+                                                            onComplete={completeTask} onEdit={startEditing} onDelete={removeTask} onUpdateNotes={updateTaskNotes} onToggleSubtask={toggleTaskSubtask} compact={false} />
                                                     ))}
                                                 </div>
                                             </div>
@@ -1095,7 +1146,7 @@
                         {/* ═══ MATTERMOST VIEW ═════════════════ */}
                         {/* ═══ EDIT / ADD TASK MODAL ═════════════ */}
                         {editingTask && (
-                            <div className="edit-overlay" onClick={() => setEditingTask(null)}>
+                            <div className="edit-overlay" onClick={() => { setEditingTask(null); setNewSubtaskText(''); }}>
                                 <div className="edit-modal" onClick={e => e.stopPropagation()}>
                                     <h3 className="modal-title">{editingTask.id === 'new' ? 'New Task' : 'Edit: ' + editingTask.name}</h3>
                                     <input type="text" value={editingTask.name} onChange={e => setEditingTask({ ...editingTask, name: e.target.value })}
@@ -1128,8 +1179,75 @@
                                         <textarea value={editingTask.notes || ''} onChange={e => setEditingTask({ ...editingTask, notes: e.target.value })}
                                             className="input task-notes-input" placeholder="Add notes to this task..." rows={3} />
                                     </div>
+                                    <div className="slider-container" style={{ marginTop: '0.5rem' }}>
+                                        <label className="slider-label">Subtasks</label>
+                                        <div className="subtasks-editor-row">
+                                            <input
+                                                type="text"
+                                                className="input"
+                                                value={newSubtaskText}
+                                                placeholder="Add a subtask..."
+                                                onChange={e => setNewSubtaskText(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key !== 'Enter') return;
+                                                    e.preventDefault();
+                                                    const text = newSubtaskText.trim();
+                                                    if (!text) return;
+                                                    setEditingTask({
+                                                        ...editingTask,
+                                                        subtasks: [...normalizeSubtasks(editingTask.subtasks), { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text, done: false }]
+                                                    });
+                                                    setNewSubtaskText('');
+                                                }}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="btn"
+                                                onClick={() => {
+                                                    const text = newSubtaskText.trim();
+                                                    if (!text) return;
+                                                    setEditingTask({
+                                                        ...editingTask,
+                                                        subtasks: [...normalizeSubtasks(editingTask.subtasks), { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text, done: false }]
+                                                    });
+                                                    setNewSubtaskText('');
+                                                }}
+                                            >
+                                                Add
+                                            </button>
+                                        </div>
+                                        <div className="subtasks-editor-list">
+                                            {normalizeSubtasks(editingTask.subtasks).length === 0 ? (
+                                                <div className="subtasks-empty">No subtasks yet</div>
+                                            ) : (
+                                                normalizeSubtasks(editingTask.subtasks).map(st => (
+                                                    <label key={st.id} className={'subtasks-editor-item' + (st.done ? ' done' : '')}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={!!st.done}
+                                                            onChange={() => setEditingTask({
+                                                                ...editingTask,
+                                                                subtasks: normalizeSubtasks(editingTask.subtasks).map(x => x.id === st.id ? { ...x, done: !x.done } : x)
+                                                            })}
+                                                        />
+                                                        <span>{st.text}</span>
+                                                        <button
+                                                            type="button"
+                                                            className="subtask-remove-btn"
+                                                            onClick={() => setEditingTask({
+                                                                ...editingTask,
+                                                                subtasks: normalizeSubtasks(editingTask.subtasks).filter(x => x.id !== st.id)
+                                                            })}
+                                                        >
+                                                            ×
+                                                        </button>
+                                                    </label>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
                                     <div className="modal-actions">
-                                        <button onClick={() => setEditingTask(null)} className="btn">Cancel</button>
+                                        <button onClick={() => { setEditingTask(null); setNewSubtaskText(''); }} className="btn">Cancel</button>
                                         <button onClick={saveEdit} className="btn btn-primary">{editingTask.id === 'new' ? 'Add Task' : 'Save'}</button>
                                     </div>
                                 </div>
