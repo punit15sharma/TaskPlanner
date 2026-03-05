@@ -591,28 +591,49 @@ body {
     color: var(--gray-400);
 }
 .tcard-subtasks-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    row-gap: 0.25rem;
     margin-top: 0.25rem;
 }
 .tcard-subtask-item {
     display: flex;
     align-items: center;
+    width: 100%;
     gap: 0.45rem;
     font-size: 0.76rem;
     color: var(--gray-600);
     line-height: 1.35;
+}
+.tcard-subtask-item span {
+    display: block;
+    white-space: normal;
+    word-break: break-word;
 }
 .tcard-subtask-item input {
     width: 14px;
     height: 14px;
     accent-color: var(--primary);
     cursor: pointer;
+    flex-shrink: 0;
 }
 .tcard-subtask-item.done span {
     text-decoration: line-through;
     color: var(--gray-400);
+}
+.tcard-subtasks-preview {
+    margin-top: 0.35rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    row-gap: 0.2rem;
+}
+.tcard-subtask-preview-item {
+    font-size: 0.72rem;
+}
+.tcard-subtasks-more {
+    font-size: 0.68rem;
+    color: var(--gray-400);
+    margin-left: 1.2rem;
 }
 .tcard-notes-textarea {
     width: 100%;
@@ -765,9 +786,9 @@ body {
 }
 .subtasks-editor-list {
     margin-top: 0.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.28rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    row-gap: 0.35rem;
 }
 .subtasks-empty {
     font-size: 0.78rem;
@@ -776,6 +797,7 @@ body {
 .subtasks-editor-item {
     display: flex;
     align-items: center;
+    width: 100%;
     gap: 0.45rem;
     padding: 0.35rem 0.45rem;
     border: 1px solid var(--gray-200);
@@ -784,23 +806,36 @@ body {
     font-size: 0.82rem;
     color: var(--gray-700);
 }
+.subtasks-editor-item span {
+    display: block;
+    white-space: normal;
+    word-break: break-word;
+}
 .subtasks-editor-item.done span {
     text-decoration: line-through;
     color: var(--gray-400);
 }
 .subtasks-editor-item input {
     accent-color: var(--primary);
+    flex-shrink: 0;
 }
 .subtask-remove-btn {
     margin-left: auto;
-    border: none;
-    background: transparent;
-    color: var(--gray-400);
-    font-size: 1rem;
+    border: 1px solid var(--gray-200);
+    background: white;
+    color: var(--gray-500);
+    font-size: 0.72rem;
+    font-weight: 500;
     line-height: 1;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
     cursor: pointer;
 }
-.subtask-remove-btn:hover { color: var(--danger); }
+.subtask-remove-btn:hover {
+    color: var(--danger);
+    border-color: rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.08);
+}
 
 .slider-container {
     padding: 0.65rem 0.85rem;
@@ -1423,10 +1458,11 @@ body {
     .tcard-subtasks { background: #252525; border-left-color: var(--primary); }
     .tcard-subtask-item { color: #ccc; }
     .tcard-subtask-item.done span { color: #888; }
+    .tcard-subtasks-more { color: #888; }
     .subtasks-editor-item { background: #252525; border-color: #3a3a3a; color: #ddd; }
     .subtasks-editor-item.done span { color: #888; }
-    .subtask-remove-btn { color: #888; }
-    .subtask-remove-btn:hover { color: #f87171; }
+    .subtask-remove-btn { color: #aaa; background: #2f2f2f; border-color: #4a4a4a; }
+    .subtask-remove-btn:hover { color: #f87171; border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.12); }
     /* Notes app dark */
     .notes-app { border-color: #3a3a3a; }
     .notes-list-panel { background: #1a1a1a; border-color: #3a3a3a; }

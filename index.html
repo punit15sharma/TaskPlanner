@@ -109,6 +109,17 @@
                                 <span>{getDaysOld(task.createdAt)}d old</span>
                             </div>
                         )}
+                        {!expanded && subtasks.length > 0 && (
+                            <div className="tcard-subtasks-preview">
+                                {subtasks.slice(0, 3).map(st => (
+                                    <div key={st.id} className={'tcard-subtask-item tcard-subtask-preview-item' + (st.done ? ' done' : '')}>
+                                        <input type="checkbox" checked={!!st.done} readOnly />
+                                        <span>{st.text}</span>
+                                    </div>
+                                ))}
+                                {subtasks.length > 3 && <div className="tcard-subtasks-more">+{subtasks.length - 3} more</div>}
+                            </div>
+                        )}
 
                         {/* Expanded: full details */}
                         {expanded && (
@@ -138,14 +149,14 @@
                                     ) : (
                                         <div className="tcard-subtasks-list">
                                             {subtasks.map(st => (
-                                                <label key={st.id} className={'tcard-subtask-item' + (st.done ? ' done' : '')}>
+                                                <div key={st.id} className={'tcard-subtask-item' + (st.done ? ' done' : '')}>
                                                     <input
                                                         type="checkbox"
                                                         checked={!!st.done}
                                                         onChange={() => onToggleSubtask && onToggleSubtask(task.id, st.id)}
                                                     />
                                                     <span>{st.text}</span>
-                                                </label>
+                                                </div>
                                             ))}
                                         </div>
                                     )}
@@ -1221,7 +1232,7 @@
                                                 <div className="subtasks-empty">No subtasks yet</div>
                                             ) : (
                                                 normalizeSubtasks(editingTask.subtasks).map(st => (
-                                                    <label key={st.id} className={'subtasks-editor-item' + (st.done ? ' done' : '')}>
+                                                    <div key={st.id} className={'subtasks-editor-item' + (st.done ? ' done' : '')}>
                                                         <input
                                                             type="checkbox"
                                                             checked={!!st.done}
@@ -1234,14 +1245,15 @@
                                                         <button
                                                             type="button"
                                                             className="subtask-remove-btn"
+                                                            title="Remove subtask"
                                                             onClick={() => setEditingTask({
                                                                 ...editingTask,
                                                                 subtasks: normalizeSubtasks(editingTask.subtasks).filter(x => x.id !== st.id)
                                                             })}
                                                         >
-                                                            ×
+                                                            Remove
                                                         </button>
-                                                    </label>
+                                                    </div>
                                                 ))
                                             )}
                                         </div>
